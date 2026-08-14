@@ -28,10 +28,13 @@ jobs:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
         run: python fetch_data.py
 
-      - name: Commit và push file dữ liệu mới
+      - name: Sinh báo cáo HTML tĩnh
+        run: python generate_report.py
+
+      - name: Commit và push file dữ liệu + báo cáo mới
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gia_lich_su_rs.csv
+          git add gia_lich_su_rs.csv docs/index.html
           git diff --cached --quiet || git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
           git push
