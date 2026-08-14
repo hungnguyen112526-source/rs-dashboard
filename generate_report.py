@@ -24,6 +24,17 @@ ACTIONS_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflow
 
 BLOCK_SIZE = 4  # dữ liệu hiện là theo TUẦN (mỗi dòng cách nhau 7 ngày) -> 4 tuần/khối ~ 1 tháng
 BLOCK_WEIGHTS = [0.4, 0.3, 0.2, 0.1]
+DATA_UNIT = "tuần"  # đơn vị của mỗi dòng dữ liệu: "tuần" nếu dữ liệu theo tuần, "phiên" nếu theo ngày
+
+
+def block_period_label(block_index, block_size=BLOCK_SIZE, unit=DATA_UNIT):
+    """Sinh tên cột thể hiện đúng khoảng thời gian & ý nghĩa của khối,
+    thay vì chỉ ghi chung chung 'Khối 1', 'Khối 2'..."""
+    start = block_size * (block_index - 1) + 1
+    end = block_size * block_index
+    if block_index == 1:
+        return f"% thay đổi giá {block_size} {unit} gần nhất"
+    return f"% thay đổi giá {unit} thứ {start}-{end} trước"
 
 
 def block_return(prices, block_index, block_size=BLOCK_SIZE):
@@ -200,8 +211,9 @@ def main():
 
   <div class="section-title">🏆 Xếp hạng cổ phiếu</div>
   <div class="hint">Bấm vào mã để xem biểu đồ giá</div>
+  <div class="hint">* Điểm thô = 0.4×(khối gần nhất) + 0.3×(khối tiếp theo) + 0.2×(khối kế) + 0.1×(khối xa nhất) — khối gần nhất được tính trọng số cao nhất vì phản ánh xu hướng giá mới nhất</div>
   <table>
-    <tr><th>Mã</th><th>Ngành</th><th>%Δ Khối 1 (gần nhất)</th><th>%Δ Khối 2</th><th>%Δ Khối 3</th><th>%Δ Khối 4 (xa nhất)</th><th>Điểm thô</th><th>RS</th></tr>
+    <tr><th>Mã</th><th>Ngành</th><th>{block_period_label(1)}</th><th>{block_period_label(2)}</th><th>{block_period_label(3)}</th><th>{block_period_label(4)}</th><th>Điểm thô*</th><th>RS</th></tr>
     {stock_rows(scores)}
   </table>
 
