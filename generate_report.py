@@ -22,7 +22,7 @@ GITHUB_REPO = "rs-dashboard"
 WORKFLOW_FILE = "update_data.yml"
 ACTIONS_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/{WORKFLOW_FILE}"
 
-BLOCK_SIZE = 30
+BLOCK_SIZE = 4  # dữ liệu hiện là theo TUẦN (mỗi dòng cách nhau 7 ngày) -> 4 tuần/khối ~ 1 tháng
 BLOCK_WEIGHTS = [0.4, 0.3, 0.2, 0.1]
 
 
@@ -86,6 +86,12 @@ def main():
         records.append(record)
 
     scores = pd.DataFrame(records)
+    if scores.empty:
+        raise SystemExit(
+            f"Không có mã nào đủ dữ liệu để tính RS. "
+            f"Cần tối thiểu {BLOCK_SIZE * len(BLOCK_WEIGHTS)} dòng dữ liệu/mã "
+            f"(hiện BLOCK_SIZE={BLOCK_SIZE}). Hãy kiểm tra lại {INPUT_FILE}."
+        )
     industry_map = df.drop_duplicates("ticker").set_index("ticker")["industry"]
     scores["industry"] = scores["ticker"].map(industry_map)
     scores["RS"] = raw_score_to_rs(scores["raw_score"])
