@@ -18,7 +18,7 @@ from vnstock import Market
 API_KEY = os.environ.get("VNSTOCK_API_KEY")
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
 OUTPUT_FILE = "gia_lich_su_rs.csv"
-START_DATE = "2025-08-01"  # đủ xa để tính RS 4/8/12 tuần, có thể chỉnh lại theo nhu cầu
+START_DATE = "2025-05-01"  # đủ xa để có >= 120 phiên giao dịch (khoảng 6 tháng)
 
 def main():
     if not API_KEY:
@@ -41,7 +41,7 @@ def main():
 
     for i, t in enumerate(tickers):
         try:
-            df = market.equity(symbol=t).ohlcv(start=START_DATE, interval="1W")
+            df = market.equity(symbol=t).ohlcv(start=START_DATE, interval="1D")
             if df is None or df.empty:
                 print(f"[{i+1}/{len(tickers)}] {t}: không có dữ liệu")
                 errors.append(t)
