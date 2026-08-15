@@ -2,4 +2,4 @@ streamlit
 pandas
 numpy
 plotly
-vnstock
+vnstock==4.0.5
