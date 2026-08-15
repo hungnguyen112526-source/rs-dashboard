@@ -22,19 +22,21 @@ GITHUB_REPO = "rs-dashboard"
 WORKFLOW_FILE = "update_data.yml"
 ACTIONS_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/{WORKFLOW_FILE}"
 
-BLOCK_SIZE = 4  # dữ liệu hiện là theo TUẦN (mỗi dòng cách nhau 7 ngày) -> 4 tuần/khối ~ 1 tháng
+BLOCK_SIZE = 30  # dữ liệu theo NGÀY (phiên giao dịch) -> đúng 30 phiên/khối theo công thức gốc
 BLOCK_WEIGHTS = [0.4, 0.3, 0.2, 0.1]
-DATA_UNIT = "tuần"  # đơn vị của mỗi dòng dữ liệu: "tuần" nếu dữ liệu theo tuần, "phiên" nếu theo ngày
+DATA_UNIT = "phiên"
 
 
 def block_period_label(block_index, block_size=BLOCK_SIZE, unit=DATA_UNIT):
-    """Sinh tên cột thể hiện đúng khoảng thời gian & ý nghĩa của khối,
-    thay vì chỉ ghi chung chung 'Khối 1', 'Khối 2'..."""
-    start = block_size * (block_index - 1) + 1
-    end = block_size * block_index
-    if block_index == 1:
-        return f"% thay đổi giá {block_size} {unit} gần nhất"
-    return f"% thay đổi giá {unit} thứ {start}-{end} trước"
+    """Sinh tên cột ngắn gọn: 'Khối N – 30 phiên ... (trọng số)'."""
+    position_text = {
+        1: "gần nhất",
+        2: "trước đó",
+        3: "trước nữa",
+        4: "xa nhất",
+    }[block_index]
+    weight = BLOCK_WEIGHTS[block_index - 1]
+    return f"Khối {block_index} – {block_size} {unit} {position_text} ({weight})"
 
 
 def block_return(prices, block_index, block_size=BLOCK_SIZE):
@@ -172,6 +174,11 @@ def main():
   }}
   .refresh-btn:hover {{ background:#1d4ed8; }}
   .refresh-hint {{ color:#64748b; font-size:12px; margin: 4px 0 24px; }}
+  .formula-box {{ background:#1e293b; border:1px solid #334155; border-radius:10px; padding:16px 20px; margin-bottom:28px; }}
+  .formula-title {{ font-size:15px; font-weight:600; margin-bottom:10px; color:#e2e8f0; }}
+  .formula-list {{ margin:0; padding-left:20px; color:#cbd5e1; font-size:13px; line-height:1.7; }}
+  .formula-list li {{ margin-bottom:4px; }}
+  .formula-note {{ margin-top:10px; color:#64748b; font-size:12px; }}
   table {{ width:100%; border-collapse: collapse; margin-bottom: 40px; background:#1e293b; border-radius:8px; overflow:hidden; }}
   th, td {{ padding: 8px 12px; text-align:left; border-bottom:1px solid #334155; font-size: 14px; }}
   th {{ background:#334155; position: sticky; top:0; }}
@@ -208,6 +215,19 @@ def main():
   </div>
   <div class="updated">Cập nhật lần cuối: {updated_at}</div>
   <div class="refresh-hint">Nút trên mở trang GitHub Actions — bấm "Run workflow" ở đó để lấy dữ liệu mới nhất và tính lại RS ngay (cần đăng nhập GitHub với quyền chủ repo).</div>
+
+  <div class="formula-box">
+    <div class="formula-title">📐 Công thức xếp hạng RS</div>
+    <ol class="formula-list">
+      <li>Chia dữ liệu giá thành <b>4 khối</b>, mỗi khối <b>30 phiên giao dịch</b> liên tiếp, không chồng lấn (Khối 1 = 30 phiên gần nhất, ... Khối 4 = 30 phiên xa nhất).</li>
+      <li>Tính <b>% thay đổi giá</b> của từng khối: %Δ = (Giá cuối khối − Giá đầu khối) / Giá đầu khối.</li>
+      <li>Tính <b>Điểm thô</b> mỗi mã = 0.4×%Δ(Khối 1) + 0.3×%Δ(Khối 2) + 0.2×%Δ(Khối 3) + 0.1×%Δ(Khối 4) — khối gần nhất có trọng số cao nhất.</li>
+      <li>Xếp hạng tất cả mã theo Điểm thô (cao → thấp), quy đổi <b>RS cổ phiếu</b> (thang 1–99) = ((N − hạng) / N) × 99 + 1, với N = tổng số mã.</li>
+      <li><b>Điểm thô Ngành</b> = trung bình cộng Điểm thô của các mã trong ngành.</li>
+      <li>Áp dụng lại bước 4 cho các ngành để ra <b>RS Ngành</b> (thang 1–99), với M = tổng số ngành.</li>
+    </ol>
+    <div class="formula-note">Cần tối thiểu 120 phiên giao dịch (~6 tháng) mỗi mã để tính đủ 4 khối.</div>
+  </div>
 
   <div class="section-title">🏆 Xếp hạng cổ phiếu</div>
   <div class="hint">Bấm vào mã để xem biểu đồ giá</div>
