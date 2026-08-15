@@ -10,6 +10,7 @@ Cách dùng:
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 import pandas as pd
 import vnai
@@ -18,7 +19,11 @@ from vnstock import Market
 API_KEY = os.environ.get("VNSTOCK_API_KEY")
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
 OUTPUT_FILE = "gia_lich_su_rs.csv"
-START_DATE = "2025-05-01"  # đủ xa để có >= 120 phiên giao dịch (khoảng 6 tháng)
+
+# Tự tính lùi lại 250 ngày lịch so với NGÀY CHẠY THỰC TẾ (không cố định cứng),
+# để công thức luôn có đủ >=120 phiên giao dịch dù chạy vào bất kỳ ngày nào trong tương lai.
+DAYS_BACK = 250
+START_DATE = (datetime.now() - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
 
 def main():
     if not API_KEY:
@@ -33,6 +38,7 @@ def main():
     tickers = symbols_df["ticker"].dropna().unique().tolist()
 
     print(f"Tổng số mã cần lấy: {len(tickers)}")
+    print(f"Lấy dữ liệu từ ngày: {START_DATE} (tự tính = hôm nay - {DAYS_BACK} ngày)")
 
     market = Market()
     frames = []
@@ -41,7 +47,7 @@ def main():
 
     for i, t in enumerate(tickers):
         try:
-            df = market.equity(symbol=t).ohlcv(start=START_DATE, interval="1D")
+            df = market.equity(symbol=t).ohlcv(start=START_DATE, interval="1D", count=200)
             if df is None or df.empty:
                 print(f"[{i+1}/{len(tickers)}] {t}: không có dữ liệu")
                 errors.append(t)
@@ -49,7 +55,8 @@ def main():
             else:
                 df = df.rename(columns={c: c.lower() for c in df.columns})
                 date_col = "time" if "time" in df.columns else "date"
-                df = df[[date_col, "close"]].rename(columns={date_col: "date"})
+                keep_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+                df = df[[date_col] + keep_cols].rename(columns={date_col: "date"})
                 df["ticker"] = t
                 frames.append(df)
                 print(f"[{i+1}/{len(tickers)}] {t}: OK ({len(df)} dòng)")
