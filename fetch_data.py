@@ -10,7 +10,6 @@ Cách dùng:
 import os
 import sys
 import time
-from datetime import datetime, timedelta
 
 import pandas as pd
 import vnai
@@ -20,10 +19,60 @@ API_KEY = os.environ.get("VNSTOCK_API_KEY")
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
 OUTPUT_FILE = "gia_lich_su_rs.csv"
 
-# Tự tính lùi lại 250 ngày lịch so với NGÀY CHẠY THỰC TẾ (không cố định cứng),
-# để công thức luôn có đủ >=120 phiên giao dịch dù chạy vào bất kỳ ngày nào trong tương lai.
-DAYS_BACK = 250
-START_DATE = (datetime.now() - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%d")
+# Không dùng ngày cố định (start=...) nữa. Thay vào đó lấy đúng N phiên gần nhất
+# tính đến ngày chạy script -> mỗi lần chạy tự động "trượt" theo ngày hiện tại.
+# Công thức RS cần tối thiểu 120 phiên (30 phiên x 4 khối); lấy dư ra 150 để an toàn
+# (một số phiên có thể bị thiếu do nghỉ lễ/dữ liệu lỗi ở nguồn).
+SESSIONS_TO_FETCH = 150
+MIN_SESSIONS_REQUIRED = 120
+
+
+def fetch_one(market, ticker):
+    """Lấy dữ liệu giá cho 1 mã. Trả về DataFrame (date, close, ticker) hoặc None nếu lỗi."""
+    df = market.equity(symbol=ticker).ohlcv(count=SESSIONS_TO_FETCH, interval="1D")
+    if df is None or df.empty:
+        return None
+    df = df.rename(columns={c: c.lower() for c in df.columns})
+    date_col = "time" if "time" in df.columns else "date"
+    df = df[[date_col, "close"]].rename(columns={date_col: "date"})
+    df["ticker"] = ticker
+    return df
+
+
+def fetch_batch(market, tickers, label=""):
+    """Lấy dữ liệu tuần tự cho danh sách mã, có nghỉ giữa các lần gọi để tránh bị
+    giới hạn API (gói Free). Trả về (frames, errors)."""
+    frames = []
+    errors = []
+    consecutive_errors = 0
+    total = len(tickers)
+
+    for i, t in enumerate(tickers):
+        prefix = f"{label}[{i+1}/{total}]" if label else f"[{i+1}/{total}]"
+        try:
+            df = fetch_one(market, t)
+            if df is None:
+                print(f"{prefix} {t}: không có dữ liệu")
+                errors.append(t)
+                consecutive_errors += 1
+            else:
+                frames.append(df)
+                print(f"{prefix} {t}: OK ({len(df)} dòng)")
+                consecutive_errors = 0
+        except Exception as e:
+            print(f"{prefix} {t}: LỖI - {type(e).__name__}")
+            errors.append(t)
+            consecutive_errors += 1
+
+        if consecutive_errors >= 3:
+            print("   >> Nghi ngờ bị giới hạn API, tạm nghỉ 60 giây...")
+            time.sleep(60)
+            consecutive_errors = 0
+        else:
+            time.sleep(5)
+
+    return frames, errors
+
 
 def main():
     if not API_KEY:
@@ -38,40 +87,18 @@ def main():
     tickers = symbols_df["ticker"].dropna().unique().tolist()
 
     print(f"Tổng số mã cần lấy: {len(tickers)}")
-    print(f"Lấy dữ liệu từ ngày: {START_DATE} (tự tính = hôm nay - {DAYS_BACK} ngày)")
 
     market = Market()
-    frames = []
-    errors = []
-    consecutive_errors = 0
 
-    for i, t in enumerate(tickers):
-        try:
-            df = market.equity(symbol=t).ohlcv(start=START_DATE, interval="1D", count=200)
-            if df is None or df.empty:
-                print(f"[{i+1}/{len(tickers)}] {t}: không có dữ liệu")
-                errors.append(t)
-                consecutive_errors += 1
-            else:
-                df = df.rename(columns={c: c.lower() for c in df.columns})
-                date_col = "time" if "time" in df.columns else "date"
-                keep_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
-                df = df[[date_col] + keep_cols].rename(columns={date_col: "date"})
-                df["ticker"] = t
-                frames.append(df)
-                print(f"[{i+1}/{len(tickers)}] {t}: OK ({len(df)} dòng)")
-                consecutive_errors = 0
-        except Exception as e:
-            print(f"[{i+1}/{len(tickers)}] {t}: LỖI - {type(e).__name__}")
-            errors.append(t)
-            consecutive_errors += 1
+    # --- Vòng lấy dữ liệu chính ---
+    frames, errors = fetch_batch(market, tickers)
 
-        if consecutive_errors >= 3:
-            print("   >> Nghi ngờ bị giới hạn API, tạm nghỉ 60 giây...")
-            time.sleep(60)
-            consecutive_errors = 0
-        else:
-            time.sleep(5)
+    # --- Retry: thử lại 1 lần nữa cho các mã bị lỗi ở vòng đầu ---
+    if errors:
+        print(f"\nThử lại {len(errors)} mã bị lỗi ở vòng đầu...")
+        retry_frames, still_errors = fetch_batch(market, errors, label="[retry]")
+        frames.extend(retry_frames)
+        errors = still_errors
 
     if not frames:
         print("LỖI: Không lấy được dữ liệu cho mã nào cả.")
@@ -83,10 +110,21 @@ def main():
 
     print(f"\nLấy thành công {price_df['ticker'].nunique()}/{len(tickers)} mã")
     if errors:
-        print("Mã lỗi/không lấy được:", errors)
+        print("Mã lỗi/không lấy được (kể cả sau khi thử lại):", errors)
+
+    # --- Cảnh báo mã không đủ dữ liệu để tính RS (vd: mã mới niêm yết) ---
+    session_counts = price_df.groupby("ticker").size()
+    insufficient = session_counts[session_counts < MIN_SESSIONS_REQUIRED]
+    if not insufficient.empty:
+        print(
+            f"\nCẢNH BÁO: {len(insufficient)} mã có ít hơn {MIN_SESSIONS_REQUIRED} phiên "
+            f"(sẽ bị loại khỏi bảng xếp hạng RS vì không đủ tính đủ 4 khối):"
+        )
+        for t, n in insufficient.items():
+            print(f"  - {t}: {n} phiên")
 
     price_df.to_csv(OUTPUT_FILE, index=False)
-    print(f"Đã lưu file {OUTPUT_FILE}")
+    print(f"\nĐã lưu file {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
