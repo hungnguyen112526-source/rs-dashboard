@@ -2,9 +2,13 @@
 Sinh báo cáo HTML tĩnh (bảng xếp hạng RS) từ gia_lich_su_rs.csv
 Dùng để publish lên GitHub Pages — không cần Streamlit, không cần server chạy liên tục.
 
-Có thêm: bấm vào 1 mã trong bảng -> hiện biểu đồ nến (candlestick) của mã đó.
+Tính năng biểu đồ:
+- Bấm vào 1 mã trong bảng -> hiện biểu đồ nến (candlestick) + khối lượng (volume) của mã đó.
+- Bấm vào tên Ngành (hoặc tên Nhóm tập đoàn) -> hiện popup danh sách biểu đồ nến+volume của
+  tất cả mã trong ngành/nhóm đó, sắp xếp theo RS giảm dần. Bấm vào 1 biểu đồ trong danh sách
+  sẽ phóng to thành biểu đồ chi tiết (dùng lại popup 1 mã).
 Toàn bộ dữ liệu OHLCV được nhúng sẵn vào file HTML (dạng JSON) khi build,
-nên khi người xem bấm vào mã, biểu đồ vẽ ngay trên trình duyệt — không cần gọi API lại.
+nên khi người xem bấm vào mã/ngành, biểu đồ vẽ ngay trên trình duyệt — không cần gọi API lại.
 """
 
 import os
@@ -60,26 +64,30 @@ def raw_score_to_rs(raw_scores):
 
 
 def build_chart_data(df: pd.DataFrame):
-    """Nhúng dữ liệu OHLC cho từng mã, dạng lightweight-charts yêu cầu:
-    [{time: 'YYYY-MM-DD', open, high, low, close}, ...]"""
+    """Nhúng dữ liệu OHLCV cho từng mã, dạng lightweight-charts yêu cầu.
+    Trả về (chart_data, has_ohlc, has_volume)."""
     has_ohlc = all(c in df.columns for c in ["open", "high", "low", "close"])
+    has_volume = "volume" in df.columns
     chart_data = {}
     for ticker, g in df.groupby("ticker"):
         g = g.sort_values("date")
         rows = []
         for _, r in g.iterrows():
             if has_ohlc:
-                rows.append({
+                row = {
                     "time": r["date"].strftime("%Y-%m-%d"),
                     "open": round(float(r["open"]), 2),
                     "high": round(float(r["high"]), 2),
                     "low": round(float(r["low"]), 2),
                     "close": round(float(r["close"]), 2),
-                })
+                }
+                if has_volume and pd.notna(r["volume"]):
+                    row["volume"] = float(r["volume"])
             else:
-                rows.append({"time": r["date"].strftime("%Y-%m-%d"), "value": round(float(r["close"]), 2)})
+                row = {"time": r["date"].strftime("%Y-%m-%d"), "value": round(float(r["close"]), 2)}
+            rows.append(row)
         chart_data[ticker] = rows
-    return chart_data, has_ohlc
+    return chart_data, has_ohlc, has_volume
 
 
 def main():
@@ -110,12 +118,32 @@ def main():
     scores["RS"] = raw_score_to_rs(scores["raw_score"])
     scores = scores.sort_values("RS", ascending=False)
 
+    # Cột "nhom" (tập đoàn) là tuỳ chọn, chỉ dùng để mở popup xem biểu đồ theo tập đoàn -
+    # KHÔNG tham gia tính RS Ngành (khác với "industry" ở trên).
+    has_nhom = "nhom" in df.columns
+    if has_nhom:
+        nhom_map = df.drop_duplicates("ticker").set_index("ticker")["nhom"]
+        scores["nhom"] = scores["ticker"].map(nhom_map)
+
     industry_raw = scores.groupby("industry")["raw_score"].mean().rename("industry_raw_score")
     industry_df = industry_raw.reset_index()
     industry_df["RS_nganh"] = raw_score_to_rs(industry_df["industry_raw_score"])
     industry_df = industry_df.sort_values("RS_nganh", ascending=False)
 
-    chart_data, has_ohlc = build_chart_data(df)
+    # --- Danh sách mã theo Ngành / Nhóm, sắp theo RS giảm dần (dùng cho popup) ---
+    # scores đã sort theo RS giảm dần ở trên nên chỉ cần append theo đúng thứ tự duyệt.
+    industry_tickers = {}
+    for _, r in scores.iterrows():
+        industry_tickers.setdefault(r["industry"], []).append({"ticker": r["ticker"], "rs": int(r["RS"])})
+
+    group_tickers = {}
+    if has_nhom:
+        for _, r in scores.dropna(subset=["nhom"]).iterrows():
+            group_tickers.setdefault(r["nhom"], []).append({"ticker": r["ticker"], "rs": int(r["RS"])})
+
+    group_data = {**industry_tickers, **group_tickers}
+
+    chart_data, has_ohlc, has_volume = build_chart_data(df)
 
     def rs_color(rs):
         if rs >= 80:
@@ -129,7 +157,7 @@ def main():
         for _, r in df_.iterrows():
             rows += f"""<tr class="stock-row" onclick="showChart('{r['ticker']}')">
                 <td class="ticker-cell">{r['ticker']}</td>
-                <td>{r['industry']}</td>
+                <td class="group-cell" onclick="event.stopPropagation(); showGroupPopup('{r['industry']}')">{r['industry']}</td>
                 <td>{r['pct_block1']:.1f}%</td>
                 <td>{r['pct_block2']:.1f}%</td>
                 <td>{r['pct_block3']:.1f}%</td>
@@ -143,15 +171,28 @@ def main():
         rows = ""
         for _, r in df_.iterrows():
             rows += f"""<tr>
-                <td>{r['industry']}</td>
+                <td class="group-cell" onclick="showGroupPopup('{r['industry']}')">{r['industry']}</td>
                 <td>{r['industry_raw_score']:.1f}</td>
                 <td style="font-weight:bold;color:{rs_color(r['RS_nganh'])}">{r['RS_nganh']}</td>
             </tr>"""
         return rows
 
+    # --- Khu vực link "Xem theo tập đoàn" (chỉ hiện nếu có dữ liệu nhóm) ---
+    group_names = sorted(group_tickers.keys())
+    if group_names:
+        links = " · ".join(
+            f'<span class="group-link" onclick="showGroupPopup(\'{name}\')">{name}</span>'
+            for name in group_names
+        )
+        group_links_html = f'<div class="group-links-row">🏢 Xem theo tập đoàn: {links}</div>'
+    else:
+        group_links_html = ""
+
     updated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
     chart_data_json = json.dumps(chart_data, ensure_ascii=False)
-    series_type = "candlestick" if has_ohlc else "line"
+    group_data_json = json.dumps(group_data, ensure_ascii=False)
+    has_ohlc_json = "true" if has_ohlc else "false"
+    has_volume_json = "true" if has_volume else "false"
 
     html = f"""<!DOCTYPE html>
 <html lang="vi">
@@ -164,7 +205,7 @@ def main():
   * {{ box-sizing: border-box; }}
   body {{ font-family: -apple-system, Arial, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; padding:24px; }}
   h1 {{ font-size: 22px; }}
-  .updated {{ color:#94a3b8; font-size: 13px; margin-bottom: 24px; }}
+  .updated {{ color:#94a3b8; font-size: 13px; margin-bottom: 8px; }}
   .header-row {{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }}
   .refresh-btn {{
     display:inline-flex; align-items:center; gap:8px;
@@ -173,7 +214,10 @@ def main():
     white-space:nowrap;
   }}
   .refresh-btn:hover {{ background:#1d4ed8; }}
-  .refresh-hint {{ color:#64748b; font-size:12px; margin: 4px 0 24px; }}
+  .refresh-hint {{ color:#64748b; font-size:12px; margin: 4px 0 12px; }}
+  .group-links-row {{ color:#93c5fd; font-size:13px; margin: 0 0 24px; }}
+  .group-link {{ cursor:pointer; text-decoration:underline dotted; }}
+  .group-link:hover {{ color:#bfdbfe; }}
   .formula-box {{ background:#1e293b; border:1px solid #334155; border-radius:10px; padding:16px 20px; margin-bottom:28px; }}
   .formula-title {{ font-size:15px; font-weight:600; margin-bottom:10px; color:#e2e8f0; }}
   .formula-list {{ margin:0; padding-left:20px; color:#cbd5e1; font-size:13px; line-height:1.7; }}
@@ -185,25 +229,41 @@ def main():
   .stock-row {{ cursor: pointer; }}
   .stock-row:hover {{ background:#334155; }}
   .ticker-cell {{ font-weight:600; color:#60a5fa; text-decoration: underline; text-decoration-style: dotted; }}
+  .group-cell {{ cursor:pointer; color:#93c5fd; text-decoration: underline; text-decoration-style: dotted; }}
+  .group-cell:hover {{ color:#bfdbfe; }}
   .section-title {{ font-size: 18px; margin: 24px 0 12px; }}
   .hint {{ color:#64748b; font-size: 12px; margin: -12px 0 16px; }}
 
-  #chart-overlay {{
+  #chart-overlay, #group-overlay {{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
-    align-items:center; justify-content:center; z-index:50;
+    align-items:center; justify-content:center; z-index:50; padding:20px;
   }}
   #chart-panel {{
     background:#1e293b; border-radius:12px; padding:20px; width:min(720px, 92vw);
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   }}
-  #chart-panel-header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }}
-  #chart-title {{ font-size:18px; font-weight:600; }}
-  #chart-close {{
+  #chart-panel-header, #group-panel-header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }}
+  #chart-title, #group-title {{ font-size:18px; font-weight:600; }}
+  #chart-close, #group-close {{
     background:#334155; border:none; color:#e2e8f0; width:28px; height:28px;
-    border-radius:6px; cursor:pointer; font-size:16px; line-height:1;
+    border-radius:6px; cursor:pointer; font-size:16px; line-height:1; flex-shrink:0;
   }}
-  #chart-close:hover {{ background:#475569; }}
+  #chart-close:hover, #group-close:hover {{ background:#475569; }}
   #chart-container {{ width:100%; height:360px; }}
+
+  #group-panel {{
+    background:#1e293b; border-radius:12px; padding:20px; width:min(900px, 95vw);
+    max-height: 90vh; display:flex; flex-direction:column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }}
+  #group-list {{ overflow-y:auto; padding-right:4px; }}
+  .mini-chart-block {{
+    background:#0f172a; border:1px solid #334155; border-radius:10px;
+    padding:12px; margin-bottom:14px; cursor:pointer;
+  }}
+  .mini-chart-block:hover {{ border-color:#60a5fa; }}
+  .mini-chart-header {{ font-size:14px; font-weight:600; margin-bottom:8px; color:#e2e8f0; }}
+  .mini-chart-container {{ width:100%; height:320px; }}
 </style>
 </head>
 <body>
@@ -215,6 +275,7 @@ def main():
   </div>
   <div class="updated">Cập nhật lần cuối: {updated_at}</div>
   <div class="refresh-hint">Nút trên mở trang GitHub Actions — bấm "Run workflow" ở đó để lấy dữ liệu mới nhất và tính lại RS ngay (cần đăng nhập GitHub với quyền chủ repo).</div>
+  {group_links_html}
 
   <div class="formula-box">
     <div class="formula-title">📐 Công thức xếp hạng RS</div>
@@ -230,7 +291,7 @@ def main():
   </div>
 
   <div class="section-title">🏆 Xếp hạng cổ phiếu</div>
-  <div class="hint">Bấm vào mã để xem biểu đồ giá</div>
+  <div class="hint">Bấm vào mã để xem biểu đồ giá · Bấm vào tên ngành để xem biểu đồ tất cả mã trong ngành</div>
   <div class="hint">* Điểm thô = 0.4×(khối gần nhất) + 0.3×(khối tiếp theo) + 0.2×(khối kế) + 0.1×(khối xa nhất) — khối gần nhất được tính trọng số cao nhất vì phản ánh xu hướng giá mới nhất</div>
   <table>
     <tr><th>Mã</th><th>Ngành</th><th>{block_period_label(1)}</th><th>{block_period_label(2)}</th><th>{block_period_label(3)}</th><th>{block_period_label(4)}</th><th>Điểm thô*</th><th>RS</th></tr>
@@ -238,6 +299,7 @@ def main():
   </table>
 
   <div class="section-title">🏭 Xếp hạng ngành</div>
+  <div class="hint">Bấm vào tên ngành để xem biểu đồ tất cả mã trong ngành</div>
   <table>
     <tr><th>Ngành</th><th>Điểm thô Ngành</th><th>RS Ngành</th></tr>
     {industry_rows(industry_df)}
@@ -253,10 +315,66 @@ def main():
     </div>
   </div>
 
+  <div id="group-overlay" onclick="if(event.target===this) closeGroupPopup()">
+    <div id="group-panel">
+      <div id="group-panel-header">
+        <div id="group-title">Danh sách mã</div>
+        <button id="group-close" onclick="closeGroupPopup()">✕</button>
+      </div>
+      <div id="group-list"></div>
+    </div>
+  </div>
+
 <script>
 const CHART_DATA = {chart_data_json};
-const SERIES_TYPE = "{series_type}";
-let currentChart = null;
+const GROUP_DATA = {group_data_json};
+const HAS_OHLC = {has_ohlc_json};
+const HAS_VOLUME = {has_volume_json};
+
+let currentChart = null;      // biểu đồ trong popup 1 mã
+let groupCharts = [];         // danh sách biểu đồ mini trong popup ngành/nhóm
+
+function buildPriceChart(container, data, height) {{
+  const chart = LightweightCharts.createChart(container, {{
+    width: container.clientWidth,
+    height: height,
+    layout: {{ background: {{ color: '#1e293b' }}, textColor: '#cbd5e1' }},
+    grid: {{ vertLines: {{ color: '#334155' }}, horzLines: {{ color: '#334155' }} }},
+    timeScale: {{ borderColor: '#475569' }},
+    rightPriceScale: {{
+      borderColor: '#475569',
+      scaleMargins: HAS_VOLUME ? {{ top: 0.1, bottom: 0.3 }} : {{ top: 0.1, bottom: 0.1 }},
+    }},
+  }});
+
+  if (HAS_OHLC) {{
+    const candleSeries = chart.addCandlestickSeries({{
+      upColor: '#16a34a', downColor: '#dc2626',
+      borderUpColor: '#16a34a', borderDownColor: '#dc2626',
+      wickUpColor: '#16a34a', wickDownColor: '#dc2626',
+    }});
+    candleSeries.setData(data.map(d => ({{ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }})));
+
+    if (HAS_VOLUME) {{
+      const volumeSeries = chart.addHistogramSeries({{
+        priceFormat: {{ type: 'volume' }},
+        priceScaleId: 'volume',
+      }});
+      chart.priceScale('volume').applyOptions({{ scaleMargins: {{ top: 0.8, bottom: 0 }} }});
+      volumeSeries.setData(data.filter(d => d.volume !== undefined).map(d => ({{
+        time: d.time,
+        value: d.volume,
+        color: d.close >= d.open ? 'rgba(22,163,74,0.5)' : 'rgba(220,38,38,0.5)',
+      }})));
+    }}
+  }} else {{
+    const series = chart.addLineSeries({{ color: '#60a5fa', lineWidth: 2 }});
+    series.setData(data);
+  }}
+
+  chart.timeScale().fitContent();
+  return chart;
+}}
 
 function closeChart() {{
   document.getElementById('chart-overlay').style.display = 'none';
@@ -274,34 +392,57 @@ function showChart(ticker) {{
   container.innerHTML = '';
   if (currentChart) {{ currentChart.remove(); }}
 
-  currentChart = LightweightCharts.createChart(container, {{
-    width: container.clientWidth,
-    height: 360,
-    layout: {{ background: {{ color: '#1e293b' }}, textColor: '#cbd5e1' }},
-    grid: {{ vertLines: {{ color: '#334155' }}, horzLines: {{ color: '#334155' }} }},
-    timeScale: {{ borderColor: '#475569' }},
-    rightPriceScale: {{ borderColor: '#475569' }},
-  }});
+  currentChart = buildPriceChart(container, data, 360);
+}}
 
-  if (SERIES_TYPE === "candlestick") {{
-    const series = currentChart.addCandlestickSeries({{
-      upColor: '#16a34a', downColor: '#dc2626',
-      borderUpColor: '#16a34a', borderDownColor: '#dc2626',
-      wickUpColor: '#16a34a', wickDownColor: '#dc2626',
+function closeGroupPopup() {{
+  document.getElementById('group-overlay').style.display = 'none';
+  groupCharts.forEach(entry => entry.chart.remove());
+  groupCharts = [];
+  document.getElementById('group-list').innerHTML = '';
+}}
+
+function showGroupPopup(name) {{
+  const list = GROUP_DATA[name];
+  if (!list) return;
+
+  closeChart();
+  document.getElementById('group-title').textContent = name + ' (' + list.length + ' mã)';
+  document.getElementById('group-overlay').style.display = 'flex';
+
+  const container = document.getElementById('group-list');
+  container.innerHTML = '';
+  groupCharts.forEach(entry => entry.chart.remove());
+  groupCharts = [];
+
+  list.forEach(item => {{
+    const data = CHART_DATA[item.ticker];
+    if (!data) return;
+
+    const block = document.createElement('div');
+    block.className = 'mini-chart-block';
+    block.innerHTML = '<div class="mini-chart-header">' + item.ticker + ' — RS: ' + item.rs + '</div>' +
+                       '<div class="mini-chart-container"></div>';
+    container.appendChild(block);
+
+    block.addEventListener('click', () => {{
+      closeGroupPopup();
+      showChart(item.ticker);
     }});
-    series.setData(data);
-  }} else {{
-    const series = currentChart.addLineSeries({{ color: '#60a5fa', lineWidth: 2 }});
-    series.setData(data);
-  }}
 
-  currentChart.timeScale().fitContent();
+    const chartDiv = block.querySelector('.mini-chart-container');
+    const chart = buildPriceChart(chartDiv, data, 320);
+    groupCharts.push({{ chart: chart, container: chartDiv }});
+  }});
 }}
 
 window.addEventListener('resize', () => {{
   if (currentChart) {{
     currentChart.applyOptions({{ width: document.getElementById('chart-container').clientWidth }});
   }}
+  groupCharts.forEach(entry => {{
+    entry.chart.applyOptions({{ width: entry.container.clientWidth }});
+  }});
 }});
 </script>
 </body>
@@ -310,7 +451,8 @@ window.addEventListener('resize', () => {{
     os.makedirs("docs", exist_ok=True)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"Đã tạo {OUTPUT_FILE} (kèm biểu đồ {'nến' if has_ohlc else 'đường (thiếu OHLC đầy đủ)'})")
+    chart_kind = "nến+volume" if (has_ohlc and has_volume) else ("nến" if has_ohlc else "đường (thiếu OHLC đầy đủ)")
+    print(f"Đã tạo {OUTPUT_FILE} (kèm biểu đồ {chart_kind}, {len(group_data)} mục ngành/nhóm có popup)")
 
 
 if __name__ == "__main__":
