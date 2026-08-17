@@ -28,13 +28,15 @@ MIN_SESSIONS_REQUIRED = 120
 
 
 def fetch_one(market, ticker):
-    """Lấy dữ liệu giá cho 1 mã. Trả về DataFrame (date, close, ticker) hoặc None nếu lỗi."""
+    """Lấy dữ liệu giá cho 1 mã. Trả về DataFrame (date, open, high, low, close, volume, ticker)
+    hoặc None nếu lỗi."""
     df = market.equity(symbol=ticker).ohlcv(count=SESSIONS_TO_FETCH, interval="1D")
     if df is None or df.empty:
         return None
     df = df.rename(columns={c: c.lower() for c in df.columns})
     date_col = "time" if "time" in df.columns else "date"
-    df = df[[date_col, "close"]].rename(columns={date_col: "date"})
+    keep_cols = [c for c in [date_col, "open", "high", "low", "close", "volume"] if c in df.columns]
+    df = df[keep_cols].rename(columns={date_col: "date"})
     df["ticker"] = ticker
     return df
 
@@ -106,7 +108,10 @@ def main():
 
     price_df = pd.concat(frames, ignore_index=True)
     price_df["date"] = pd.to_datetime(price_df["date"])
-    price_df = price_df.merge(symbols_df[["ticker", "industry"]], on="ticker", how="left")
+    merge_cols = ["ticker", "industry"]
+    if "nhom" in symbols_df.columns:
+        merge_cols.append("nhom")
+    price_df = price_df.merge(symbols_df[merge_cols], on="ticker", how="left")
 
     print(f"\nLấy thành công {price_df['ticker'].nunique()}/{len(tickers)} mã")
     if errors:
