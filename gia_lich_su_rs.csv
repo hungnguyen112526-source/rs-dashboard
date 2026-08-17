@@ -21333,6 +21333,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,21.75,NT2,Điện & Năng lượng
 2026-08-13 07:00:00,21.55,NT2,Điện & Năng lượng
 2026-08-14 07:00:00,21.2,NT2,Điện & Năng lượng
+2026-08-14 07:00:00,21.2,NT2,Điện & Năng lượng
 2026-02-23 07:00:00,13.85,POW,Điện & Năng lượng
 2026-02-24 07:00:00,13.9,POW,Điện & Năng lượng
 2026-02-25 07:00:00,14.3,POW,Điện & Năng lượng
@@ -21454,6 +21455,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,13.75,POW,Điện & Năng lượng
 2026-08-12 07:00:00,13.75,POW,Điện & Năng lượng
 2026-08-13 07:00:00,13.5,POW,Điện & Năng lượng
+2026-08-14 07:00:00,13.25,POW,Điện & Năng lượng
 2026-08-14 07:00:00,13.25,POW,Điện & Năng lượng
 2026-02-23 07:00:00,10.15,PPC,Điện & Năng lượng
 2026-02-24 07:00:00,10.2,PPC,Điện & Năng lượng
@@ -21577,6 +21579,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,8.96,PPC,Điện & Năng lượng
 2026-08-13 07:00:00,8.98,PPC,Điện & Năng lượng
 2026-08-14 07:00:00,9.14,PPC,Điện & Năng lượng
+2026-08-14 07:00:00,9.14,PPC,Điện & Năng lượng
 2026-02-23 07:00:00,12.8,QTP,Điện & Năng lượng
 2026-02-24 07:00:00,12.7,QTP,Điện & Năng lượng
 2026-02-25 07:00:00,12.6,QTP,Điện & Năng lượng
@@ -21698,6 +21701,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,11.3,QTP,Điện & Năng lượng
 2026-08-12 07:00:00,11.2,QTP,Điện & Năng lượng
 2026-08-13 07:00:00,11.2,QTP,Điện & Năng lượng
+2026-08-14 07:00:00,11.1,QTP,Điện & Năng lượng
 2026-08-14 07:00:00,11.1,QTP,Điện & Năng lượng
 2026-02-23 07:00:00,53.02,REE,Điện & Năng lượng
 2026-02-24 07:00:00,53.28,REE,Điện & Năng lượng
@@ -21821,6 +21825,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,47.15,REE,Điện & Năng lượng
 2026-08-13 07:00:00,46.6,REE,Điện & Năng lượng
 2026-08-14 07:00:00,45.9,REE,Điện & Năng lượng
+2026-08-14 07:00:00,45.9,REE,Điện & Năng lượng
 2026-02-23 07:00:00,11.0,TTA,Điện & Năng lượng
 2026-02-24 07:00:00,11.25,TTA,Điện & Năng lượng
 2026-02-25 07:00:00,11.45,TTA,Điện & Năng lượng
@@ -21942,6 +21947,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,11.4,TTA,Điện & Năng lượng
 2026-08-12 07:00:00,11.3,TTA,Điện & Năng lượng
 2026-08-13 07:00:00,11.1,TTA,Điện & Năng lượng
+2026-08-14 07:00:00,11.2,TTA,Điện & Năng lượng
 2026-08-14 07:00:00,11.2,TTA,Điện & Năng lượng
 2026-02-23 07:00:00,18.65,CII,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,18.5,CII,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22065,6 +22071,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,14.2,CII,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,13.9,CII,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,13.95,CII,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,13.95,CII,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,23.8,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,24.3,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-25 07:00:00,24.45,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22186,6 +22193,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,19.4,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-12 07:00:00,19.5,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,19.5,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,19.05,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,19.05,CTI,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,13.8,FCN,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,13.85,FCN,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22309,6 +22317,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,11.35,FCN,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,11.35,FCN,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,11.25,FCN,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,11.25,FCN,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,11.93,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,11.89,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-25 07:00:00,11.98,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22430,6 +22439,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,10.15,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-12 07:00:00,10.3,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,10.15,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,10.05,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,10.05,HHV,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,16.1,HT1,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,16.5,HT1,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22553,6 +22563,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,13.3,HT1,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,13.25,HT1,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,13.0,HT1,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,13.0,HT1,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,17.55,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,17.6,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-25 07:00:00,17.95,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22674,6 +22685,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,13.35,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-12 07:00:00,14.25,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,14.4,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,13.75,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,13.75,KSB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,9.75,LCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,9.8,LCG,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22797,6 +22809,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,7.4,LCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,7.21,LCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,7.05,LCG,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,7.05,LCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,32.2,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,31.8,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-25 07:00:00,32.1,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -22918,6 +22931,7 @@ date,close,ticker,industry
 2026-08-11 07:00:00,20.2,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-12 07:00:00,20.8,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,20.3,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,20.3,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,20.3,PLC,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,17.11,VCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,17.07,VCG,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -23041,6 +23055,7 @@ date,close,ticker,industry
 2026-08-12 07:00:00,16.15,VCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,15.8,VCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,15.8,VCG,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,15.8,VCG,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-23 07:00:00,47.11,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-24 07:00:00,46.92,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-02-25 07:00:00,47.02,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
@@ -23162,4 +23177,5 @@ date,close,ticker,industry
 2026-08-11 07:00:00,48.2,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-12 07:00:00,48.4,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-13 07:00:00,48.4,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
+2026-08-14 07:00:00,48.2,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
 2026-08-14 07:00:00,48.2,VLB,Đầu tư công (Gồm cả VLXD cơ bản)
