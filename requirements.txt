@@ -3,3 +3,4 @@ pandas
 numpy
 plotly
 vnstock==4.0.5
+ 
