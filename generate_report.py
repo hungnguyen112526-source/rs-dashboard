@@ -2,13 +2,15 @@
 Sinh báo cáo HTML tĩnh (bảng xếp hạng RS) từ gia_lich_su_rs.csv
 Dùng để publish lên GitHub Pages — không cần Streamlit, không cần server chạy liên tục.
 
-Tính năng biểu đồ:
-- Bấm vào 1 mã trong bảng -> hiện biểu đồ nến (candlestick) + khối lượng (volume) của mã đó.
-- Bấm vào tên Ngành (hoặc tên Nhóm tập đoàn) -> hiện popup danh sách biểu đồ nến+volume của
-  tất cả mã trong ngành/nhóm đó, sắp xếp theo RS giảm dần. Bấm vào 1 biểu đồ trong danh sách
-  sẽ phóng to thành biểu đồ chi tiết (dùng lại popup 1 mã).
-Toàn bộ dữ liệu OHLCV được nhúng sẵn vào file HTML (dạng JSON) khi build,
-nên khi người xem bấm vào mã/ngành, biểu đồ vẽ ngay trên trình duyệt — không cần gọi API lại.
+Tính năng:
+- Bấm vào 1 mã trong bảng -> hiện biểu đồ nến (candlestick) + khối lượng (volume) của mã đó,
+  có nút chuyển đổi Ngày/Tuần.
+- Bấm vào tên Ngành (hoặc tên Nhóm tập đoàn) -> popup danh sách biểu đồ nến+volume của tất cả
+  mã trong ngành/nhóm đó, sắp theo RS giảm dần. Bấm vào 1 biểu đồ trong danh sách để phóng to.
+- Chỉ số tổng hợp có trọng số dòng tiền (money-flow weighted index), mốc 1000 điểm, tính cho
+  toàn thị trường và từng ngành riêng, chọn xem qua dropdown.
+Toàn bộ dữ liệu OHLCV được nhúng sẵn vào file HTML (dạng mảng, tối ưu dung lượng) khi build,
+nên khi người xem tương tác, biểu đồ vẽ ngay trên trình duyệt — không cần gọi API lại.
 """
 
 import os
@@ -33,12 +35,7 @@ DATA_UNIT = "phiên"
 
 def block_period_label(block_index, block_size=BLOCK_SIZE, unit=DATA_UNIT):
     """Sinh tên cột ngắn gọn: 'Khối N – 30 phiên ... (trọng số)'."""
-    position_text = {
-        1: "gần nhất",
-        2: "trước đó",
-        3: "trước nữa",
-        4: "xa nhất",
-    }[block_index]
+    position_text = {1: "gần nhất", 2: "trước đó", 3: "trước nữa", 4: "xa nhất"}[block_index]
     weight = BLOCK_WEIGHTS[block_index - 1]
     return f"Khối {block_index} – {block_size} {unit} {position_text} ({weight})"
 
@@ -64,7 +61,9 @@ def raw_score_to_rs(raw_scores):
 
 
 def build_chart_data(df: pd.DataFrame):
-    """Nhúng dữ liệu OHLCV cho từng mã, dạng lightweight-charts yêu cầu.
+    """Nhúng dữ liệu OHLCV cho từng mã, dạng MẢNG (tối ưu dung lượng so với object):
+    có OHLC: [time, open, high, low, close, volume-hoặc-null]
+    chỉ có close: [time, close]
     Trả về (chart_data, has_ohlc, has_volume)."""
     has_ohlc = all(c in df.columns for c in ["open", "high", "low", "close"])
     has_volume = "volume" in df.columns
@@ -73,21 +72,53 @@ def build_chart_data(df: pd.DataFrame):
         g = g.sort_values("date")
         rows = []
         for _, r in g.iterrows():
+            t = r["date"].strftime("%Y-%m-%d")
             if has_ohlc:
-                row = {
-                    "time": r["date"].strftime("%Y-%m-%d"),
-                    "open": round(float(r["open"]), 2),
-                    "high": round(float(r["high"]), 2),
-                    "low": round(float(r["low"]), 2),
-                    "close": round(float(r["close"]), 2),
-                }
-                if has_volume and pd.notna(r["volume"]):
-                    row["volume"] = float(r["volume"])
+                row = [t, round(float(r["open"]), 2), round(float(r["high"]), 2),
+                       round(float(r["low"]), 2), round(float(r["close"]), 2)]
+                if has_volume and pd.notna(r.get("volume")):
+                    row.append(round(float(r["volume"]), 0))
+                else:
+                    row.append(None)
             else:
-                row = {"time": r["date"].strftime("%Y-%m-%d"), "value": round(float(r["close"]), 2)}
+                row = [t, round(float(r["close"]), 2)]
             rows.append(row)
         chart_data[ticker] = rows
     return chart_data, has_ohlc, has_volume
+
+
+def compute_index_series(sub_df: pd.DataFrame):
+    """Tính chỉ số tổng hợp trọng số dòng tiền cho 1 rổ mã (toàn thị trường hoặc 1 ngành).
+    sub_df cần có cột: date, ticker, close, volume.
+    Trả về list [[time_str, index_value], ...], mốc 1000 tại phiên đầu tiên.
+    Mã thiếu dữ liệu ngày nào bị loại khỏi tính trọng số ngày đó (không làm hỏng cả index)."""
+    close_pivot = sub_df.pivot(index="date", columns="ticker", values="close").sort_index()
+    volume_pivot = sub_df.pivot(index="date", columns="ticker", values="volume").sort_index()
+
+    # forward-fill CHỈ để tính %Δ (nếu 1 mã nghỉ giao dịch rồi quay lại, %Δ phiên quay lại
+    # so với giá hợp lệ gần nhất) - KHÔNG dùng bản ffill này để xác định mã có dữ liệu ngày nào,
+    # việc đó vẫn dựa trên close_pivot/volume_pivot gốc (có NaN thật) để loại đúng mã thiếu
+    # dữ liệu khỏi trọng số của đúng ngày đó.
+    pct_change = close_pivot.ffill().pct_change(fill_method=None)
+    value_traded = close_pivot * volume_pivot
+
+    dates = close_pivot.index
+    result = []
+    current = 1000.0
+    for i in range(len(dates)):
+        d = dates[i]
+        if i == 0:
+            result.append([d.strftime("%Y-%m-%d"), round(current, 2)])
+            continue
+        row_pct = pct_change.iloc[i]
+        row_val = value_traded.iloc[i]
+        valid = row_pct.notna() & row_val.notna() & (row_val > 0)
+        if valid.sum() > 0:
+            w = row_val[valid] / row_val[valid].sum()
+            pct_idx = (w * row_pct[valid]).sum()
+            current = current * (1 + pct_idx)
+        result.append([d.strftime("%Y-%m-%d"), round(current, 2)])
+    return result
 
 
 def main():
@@ -131,7 +162,6 @@ def main():
     industry_df = industry_df.sort_values("RS_nganh", ascending=False)
 
     # --- Danh sách mã theo Ngành / Nhóm, sắp theo RS giảm dần (dùng cho popup) ---
-    # scores đã sort theo RS giảm dần ở trên nên chỉ cần append theo đúng thứ tự duyệt.
     industry_tickers = {}
     for _, r in scores.iterrows():
         industry_tickers.setdefault(r["industry"], []).append({"ticker": r["ticker"], "rs": int(r["RS"])})
@@ -144,6 +174,18 @@ def main():
     group_data = {**industry_tickers, **group_tickers}
 
     chart_data, has_ohlc, has_volume = build_chart_data(df)
+
+    # --- Chỉ số tổng hợp trọng số dòng tiền (toàn thị trường + từng ngành) ---
+    index_data = {}
+    if has_volume:
+        index_data["Toàn thị trường"] = compute_index_series(df[["date", "ticker", "close", "volume"]])
+        for nganh in sorted(df["industry"].dropna().unique()):
+            sub = df[df["industry"] == nganh][["date", "ticker", "close", "volume"]]
+            if sub["ticker"].nunique() < 1:
+                continue
+            series = compute_index_series(sub)
+            if series:
+                index_data[nganh] = series
 
     def rs_color(rs):
         if rs >= 80:
@@ -188,9 +230,21 @@ def main():
     else:
         group_links_html = ""
 
+    # --- Khu vực Chỉ số dòng tiền (chỉ hiện nếu có volume) ---
+    if index_data:
+        index_section_html = """
+  <div class="section-title">📊 Chỉ số dòng tiền (Money-flow Weighted Index)</div>
+  <div class="hint">Mốc khởi điểm 1000 điểm tại phiên đầu tiên có dữ liệu. Trọng số mỗi mã theo giá trị giao dịch (giá × khối lượng) trong ngày.</div>
+  <select id="index-select" class="index-select"></select>
+  <div id="index-chart-container"></div>
+"""
+    else:
+        index_section_html = ""
+
     updated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
     chart_data_json = json.dumps(chart_data, ensure_ascii=False)
     group_data_json = json.dumps(group_data, ensure_ascii=False)
+    index_data_json = json.dumps(index_data, ensure_ascii=False)
     has_ohlc_json = "true" if has_ohlc else "false"
     has_volume_json = "true" if has_volume else "false"
 
@@ -234,6 +288,12 @@ def main():
   .section-title {{ font-size: 18px; margin: 24px 0 12px; }}
   .hint {{ color:#64748b; font-size: 12px; margin: -12px 0 16px; }}
 
+  .index-select {{
+    background:#1e293b; color:#e2e8f0; border:1px solid #334155; border-radius:8px;
+    padding:8px 12px; font-size:14px; margin-bottom:12px;
+  }}
+  #index-chart-container {{ width:100%; height:360px; margin-bottom:40px; background:#1e293b; border-radius:8px; }}
+
   #chart-overlay, #group-overlay {{
     display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
     align-items:center; justify-content:center; z-index:50; padding:20px;
@@ -242,14 +302,13 @@ def main():
     background:#1e293b; border-radius:12px; padding:20px; width:min(720px, 92vw);
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   }}
-  #chart-panel-header, #group-panel-header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }}
-  #chart-title, #group-title {{ font-size:18px; font-weight:600; }}
+  #chart-panel-header, #group-panel-header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; }}
+  #chart-title, #group-title {{ font-size:18px; font-weight:600; flex:1; }}
   #chart-close, #group-close {{
     background:#334155; border:none; color:#e2e8f0; width:28px; height:28px;
     border-radius:6px; cursor:pointer; font-size:16px; line-height:1; flex-shrink:0;
   }}
   #chart-close:hover, #group-close:hover {{ background:#475569; }}
-  #chart-container {{ width:100%; height:360px; }}
 
   #group-panel {{
     background:#1e293b; border-radius:12px; padding:20px; width:min(900px, 95vw);
@@ -262,8 +321,16 @@ def main():
     padding:12px; margin-bottom:14px; cursor:pointer;
   }}
   .mini-chart-block:hover {{ border-color:#60a5fa; }}
-  .mini-chart-header {{ font-size:14px; font-weight:600; margin-bottom:8px; color:#e2e8f0; }}
-  .mini-chart-container {{ width:100%; height:320px; }}
+
+  .tf-toolbar {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }}
+  .tf-toolbar-title {{ font-size:14px; font-weight:600; color:#e2e8f0; }}
+  .tf-btns {{ display:flex; gap:4px; }}
+  .tf-btn {{
+    background:#334155; border:none; color:#94a3b8; font-size:12px; padding:4px 10px;
+    border-radius:6px; cursor:pointer;
+  }}
+  .tf-btn:hover {{ background:#475569; }}
+  .tf-btn.tf-active {{ background:#2563eb; color:#fff; }}
 </style>
 </head>
 <body>
@@ -304,6 +371,7 @@ def main():
     <tr><th>Ngành</th><th>Điểm thô Ngành</th><th>RS Ngành</th></tr>
     {industry_rows(industry_df)}
   </table>
+  {index_section_html}
 
   <div id="chart-overlay" onclick="if(event.target===this) closeChart()">
     <div id="chart-panel">
@@ -311,7 +379,7 @@ def main():
         <div id="chart-title">Biểu đồ giá</div>
         <button id="chart-close" onclick="closeChart()">✕</button>
       </div>
-      <div id="chart-container"></div>
+      <div id="chart-mount"></div>
     </div>
   </div>
 
@@ -328,12 +396,54 @@ def main():
 <script>
 const CHART_DATA = {chart_data_json};
 const GROUP_DATA = {group_data_json};
+const INDEX_DATA = {index_data_json};
 const HAS_OHLC = {has_ohlc_json};
 const HAS_VOLUME = {has_volume_json};
 
-let currentChart = null;      // biểu đồ trong popup 1 mã
-let groupCharts = [];         // danh sách biểu đồ mini trong popup ngành/nhóm
+let currentChartState = null;   // {{ chart, container }} - popup 1 mã
+let groupChartStates = [];      // danh sách {{ chart, container }} - popup ngành/nhóm
+let indexChart = null;
 
+// ---------- Gộp dữ liệu ngày -> tuần (Thứ 2 làm mốc tuần) ----------
+function getMonday(dateStr) {{
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const day = d.getUTCDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}}
+
+function aggregateWeekly(dailyArr) {{
+  if (!dailyArr.length) return [];
+  const isOHLC = dailyArr[0].length >= 5;
+  const weeks = {{}};
+  const order = [];
+  for (const r of dailyArr) {{
+    const key = getMonday(r[0]);
+    if (!weeks[key]) {{
+      order.push(key);
+      weeks[key] = isOHLC
+        ? {{ time: key, open: r[1], high: r[2], low: r[3], close: r[4], volume: (r[5] || 0) }}
+        : {{ time: key, close: r[1] }};
+    }} else {{
+      const w = weeks[key];
+      if (isOHLC) {{
+        w.high = Math.max(w.high, r[2]);
+        w.low = Math.min(w.low, r[3]);
+        w.close = r[4];
+        w.volume += (r[5] || 0);
+      }} else {{
+        w.close = r[1];
+      }}
+    }}
+  }}
+  return order.map(k => {{
+    const w = weeks[k];
+    return isOHLC ? [w.time, w.open, w.high, w.low, w.close, w.volume] : [w.time, w.close];
+  }});
+}}
+
+// ---------- Vẽ 1 biểu đồ giá (nến+volume hoặc đường) từ dữ liệu dạng mảng ----------
 function buildPriceChart(container, data, height) {{
   const chart = LightweightCharts.createChart(container, {{
     width: container.clientWidth,
@@ -353,7 +463,7 @@ function buildPriceChart(container, data, height) {{
       borderUpColor: '#16a34a', borderDownColor: '#dc2626',
       wickUpColor: '#16a34a', wickDownColor: '#dc2626',
     }});
-    candleSeries.setData(data.map(d => ({{ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }})));
+    candleSeries.setData(data.map(d => ({{ time: d[0], open: d[1], high: d[2], low: d[3], close: d[4] }})));
 
     if (HAS_VOLUME) {{
       const volumeSeries = chart.addHistogramSeries({{
@@ -361,24 +471,62 @@ function buildPriceChart(container, data, height) {{
         priceScaleId: 'volume',
       }});
       chart.priceScale('volume').applyOptions({{ scaleMargins: {{ top: 0.8, bottom: 0 }} }});
-      volumeSeries.setData(data.filter(d => d.volume !== undefined).map(d => ({{
-        time: d.time,
-        value: d.volume,
-        color: d.close >= d.open ? 'rgba(22,163,74,0.5)' : 'rgba(220,38,38,0.5)',
-      }})));
+      volumeSeries.setData(
+        data.filter(d => d[5] !== undefined && d[5] !== null).map(d => ({{
+          time: d[0], value: d[5],
+          color: d[4] >= d[1] ? 'rgba(22,163,74,0.5)' : 'rgba(220,38,38,0.5)',
+        }}))
+      );
     }}
   }} else {{
     const series = chart.addLineSeries({{ color: '#60a5fa', lineWidth: 2 }});
-    series.setData(data);
+    series.setData(data.map(d => ({{ time: d[0], value: d[1] }})));
   }}
 
   chart.timeScale().fitContent();
   return chart;
 }}
 
+// ---------- Gắn 1 biểu đồ + toolbar Ngày/Tuần vào 1 khu vực (dùng chung cho popup 1 mã và mini-chart) ----------
+function mountChart(parentEl, dailyData, height, titleText) {{
+  const toolbar = document.createElement('div');
+  toolbar.className = 'tf-toolbar';
+  toolbar.innerHTML =
+    '<div class="tf-toolbar-title">' + (titleText || '') + '</div>' +
+    '<div class="tf-btns">' +
+      '<button class="tf-btn tf-active" data-tf="D">Ngày</button>' +
+      '<button class="tf-btn" data-tf="W">Tuần</button>' +
+    '</div>';
+  parentEl.appendChild(toolbar);
+
+  const chartDiv = document.createElement('div');
+  chartDiv.style.width = '100%';
+  chartDiv.style.height = height + 'px';
+  parentEl.appendChild(chartDiv);
+
+  const weeklyData = aggregateWeekly(dailyData);
+  const state = {{ chart: buildPriceChart(chartDiv, dailyData, height), container: chartDiv }};
+
+  toolbar.querySelectorAll('.tf-btn').forEach(btn => {{
+    btn.addEventListener('click', (e) => {{
+      e.stopPropagation();
+      if (btn.classList.contains('tf-active')) return;
+      toolbar.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('tf-active'));
+      btn.classList.add('tf-active');
+      state.chart.remove();
+      const newData = btn.dataset.tf === 'W' ? weeklyData : dailyData;
+      state.chart = buildPriceChart(chartDiv, newData, height);
+    }});
+  }});
+
+  return state;
+}}
+
+// ---------- Popup 1 mã ----------
 function closeChart() {{
   document.getElementById('chart-overlay').style.display = 'none';
-  if (currentChart) {{ currentChart.remove(); currentChart = null; }}
+  if (currentChartState) {{ currentChartState.chart.remove(); currentChartState = null; }}
+  document.getElementById('chart-mount').innerHTML = '';
 }}
 
 function showChart(ticker) {{
@@ -388,17 +536,18 @@ function showChart(ticker) {{
   document.getElementById('chart-title').textContent = ticker + ' — Biểu đồ giá';
   document.getElementById('chart-overlay').style.display = 'flex';
 
-  const container = document.getElementById('chart-container');
-  container.innerHTML = '';
-  if (currentChart) {{ currentChart.remove(); }}
+  const mount = document.getElementById('chart-mount');
+  mount.innerHTML = '';
+  if (currentChartState) {{ currentChartState.chart.remove(); }}
 
-  currentChart = buildPriceChart(container, data, 360);
+  currentChartState = mountChart(mount, data, 360, '');
 }}
 
+// ---------- Popup Ngành / Nhóm (danh sách nhiều mini-chart) ----------
 function closeGroupPopup() {{
   document.getElementById('group-overlay').style.display = 'none';
-  groupCharts.forEach(entry => entry.chart.remove());
-  groupCharts = [];
+  groupChartStates.forEach(s => s.chart.remove());
+  groupChartStates = [];
   document.getElementById('group-list').innerHTML = '';
 }}
 
@@ -412,8 +561,8 @@ function showGroupPopup(name) {{
 
   const container = document.getElementById('group-list');
   container.innerHTML = '';
-  groupCharts.forEach(entry => entry.chart.remove());
-  groupCharts = [];
+  groupChartStates.forEach(s => s.chart.remove());
+  groupChartStates = [];
 
   list.forEach(item => {{
     const data = CHART_DATA[item.ticker];
@@ -421,8 +570,6 @@ function showGroupPopup(name) {{
 
     const block = document.createElement('div');
     block.className = 'mini-chart-block';
-    block.innerHTML = '<div class="mini-chart-header">' + item.ticker + ' — RS: ' + item.rs + '</div>' +
-                       '<div class="mini-chart-container"></div>';
     container.appendChild(block);
 
     block.addEventListener('click', () => {{
@@ -430,19 +577,60 @@ function showGroupPopup(name) {{
       showChart(item.ticker);
     }});
 
-    const chartDiv = block.querySelector('.mini-chart-container');
-    const chart = buildPriceChart(chartDiv, data, 320);
-    groupCharts.push({{ chart: chart, container: chartDiv }});
+    const state = mountChart(block, data, 320, item.ticker + ' — RS: ' + item.rs);
+    groupChartStates.push(state);
   }});
 }}
 
-window.addEventListener('resize', () => {{
-  if (currentChart) {{
-    currentChart.applyOptions({{ width: document.getElementById('chart-container').clientWidth }});
-  }}
-  groupCharts.forEach(entry => {{
-    entry.chart.applyOptions({{ width: entry.container.clientWidth }});
+// ---------- Chỉ số dòng tiền (Money-flow Weighted Index) ----------
+function renderIndexChart(name) {{
+  const data = INDEX_DATA[name];
+  const container = document.getElementById('index-chart-container');
+  if (!data || !container) return;
+  container.innerHTML = '';
+  if (indexChart) {{ indexChart.remove(); }}
+
+  indexChart = LightweightCharts.createChart(container, {{
+    width: container.clientWidth,
+    height: 360,
+    layout: {{ background: {{ color: '#1e293b' }}, textColor: '#cbd5e1' }},
+    grid: {{ vertLines: {{ color: '#334155' }}, horzLines: {{ color: '#334155' }} }},
+    timeScale: {{ borderColor: '#475569' }},
+    rightPriceScale: {{ borderColor: '#475569' }},
   }});
+  const series = indexChart.addAreaSeries({{
+    lineColor: '#60a5fa', topColor: 'rgba(96,165,250,0.3)', bottomColor: 'rgba(96,165,250,0.0)', lineWidth: 2,
+  }});
+  series.setData(data.map(d => ({{ time: d[0], value: d[1] }})));
+  indexChart.timeScale().fitContent();
+}}
+
+function initIndexSelect() {{
+  const select = document.getElementById('index-select');
+  if (!select) return;
+  Object.keys(INDEX_DATA).forEach(name => {{
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  }});
+  select.addEventListener('change', () => renderIndexChart(select.value));
+  if (Object.keys(INDEX_DATA).length) renderIndexChart(select.value);
+}}
+initIndexSelect();
+
+// ---------- Resize ----------
+window.addEventListener('resize', () => {{
+  if (currentChartState) {{
+    currentChartState.chart.applyOptions({{ width: currentChartState.container.clientWidth }});
+  }}
+  groupChartStates.forEach(s => {{
+    s.chart.applyOptions({{ width: s.container.clientWidth }});
+  }});
+  if (indexChart) {{
+    const c = document.getElementById('index-chart-container');
+    if (c) indexChart.applyOptions({{ width: c.clientWidth }});
+  }}
 }});
 </script>
 </body>
@@ -452,7 +640,10 @@ window.addEventListener('resize', () => {{
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(html)
     chart_kind = "nến+volume" if (has_ohlc and has_volume) else ("nến" if has_ohlc else "đường (thiếu OHLC đầy đủ)")
-    print(f"Đã tạo {OUTPUT_FILE} (kèm biểu đồ {chart_kind}, {len(group_data)} mục ngành/nhóm có popup)")
+    print(
+        f"Đã tạo {OUTPUT_FILE} (kèm biểu đồ {chart_kind}, {len(group_data)} mục ngành/nhóm có popup, "
+        f"{len(index_data)} chỉ số dòng tiền)"
+    )
 
 
 if __name__ == "__main__":
