@@ -2,8 +2,8 @@ name: Cập nhật dữ liệu RS hàng ngày
 
 on:
   schedule:
-    # Chạy lúc 23:00 UTC = 6:00 sáng giờ Việt Nam, các ngày trong tuần (T2-T6)
-    - cron: "0 23 * * 0-4"
+    # Chạy lúc 09:30 UTC = 16:30 (4h30 chiều) giờ Việt Nam, các ngày trong tuần (T2-T6)
+    - cron: "30 9 * * 1-5"
   workflow_dispatch: {}  # cho phép bấm chạy tay từ tab Actions trên GitHub
 
 jobs:
