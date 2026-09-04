@@ -23,7 +23,7 @@ OUTPUT_FILE = "gia_lich_su_rs.csv"
 # tính đến ngày chạy script -> mỗi lần chạy tự động "trượt" theo ngày hiện tại.
 # Công thức RS cần tối thiểu 120 phiên (30 phiên x 4 khối); lấy dư ra 150 để an toàn
 # (một số phiên có thể bị thiếu do nghỉ lễ/dữ liệu lỗi ở nguồn).
-SESSIONS_TO_FETCH = 4000
+SESSIONS_TO_FETCH = 10000000000000000000
 MIN_SESSIONS_REQUIRED = 120
 
 
