@@ -41,6 +41,24 @@ def fetch_one(market, ticker):
     return df
 
 
+def fetch_index(market, symbol="VNINDEX"):
+    """Lấy dữ liệu OHLCV cho 1 chỉ số thị trường (VNINDEX...) - dùng market.index() thay vì
+    market.equity() vì đây không phải cổ phiếu riêng lẻ. Trả về DataFrame hoặc None nếu lỗi."""
+    try:
+        df = market.index(symbol=symbol).ohlcv(count=SESSIONS_TO_FETCH, interval="1D")
+    except Exception as e:
+        print(f"Lỗi lấy chỉ số {symbol}: {type(e).__name__}")
+        return None
+    if df is None or df.empty:
+        return None
+    df = df.rename(columns={c: c.lower() for c in df.columns})
+    date_col = "time" if "time" in df.columns else "date"
+    keep_cols = [c for c in [date_col, "open", "high", "low", "close", "volume"] if c in df.columns]
+    df = df[keep_cols].rename(columns={date_col: "date"})
+    df["ticker"] = symbol
+    return df
+
+
 def fetch_batch(market, tickers, label=""):
     """Lấy dữ liệu tuần tự cho danh sách mã, có nghỉ giữa các lần gọi để tránh bị
     giới hạn API (gói Free). Trả về (frames, errors)."""
@@ -113,12 +131,26 @@ def main():
         merge_cols.append("nhom")
     price_df = price_df.merge(symbols_df[merge_cols], on="ticker", how="left")
 
+    # --- Lấy thêm VNINDEX làm chỉ số tham chiếu (không phải cổ phiếu, không thuộc ngành nào) ---
+    print("\nLấy dữ liệu chỉ số tham chiếu VNINDEX...")
+    vnindex_df = fetch_index(market, "VNINDEX")
+    if vnindex_df is not None:
+        vnindex_df["date"] = pd.to_datetime(vnindex_df["date"])
+        vnindex_df["industry"] = None
+        if "nhom" in symbols_df.columns:
+            vnindex_df["nhom"] = None
+        price_df = pd.concat([price_df, vnindex_df], ignore_index=True)
+        print(f"Đã thêm VNINDEX ({len(vnindex_df)} phiên).")
+    else:
+        print("CẢNH BÁO: Không lấy được dữ liệu VNINDEX - biểu đồ sẽ thiếu đường tham chiếu.")
+
     print(f"\nLấy thành công {price_df['ticker'].nunique()}/{len(tickers)} mã")
     if errors:
         print("Mã lỗi/không lấy được (kể cả sau khi thử lại):", errors)
 
     # --- Cảnh báo mã không đủ dữ liệu để tính RS (vd: mã mới niêm yết) ---
-    session_counts = price_df.groupby("ticker").size()
+    # Loại VNINDEX ra khỏi cảnh báo này vì nó không phải cổ phiếu, không cần tính RS.
+    session_counts = price_df[price_df["ticker"] != "VNINDEX"].groupby("ticker").size()
     insufficient = session_counts[session_counts < MIN_SESSIONS_REQUIRED]
     if not insufficient.empty:
         print(
@@ -127,6 +159,15 @@ def main():
         )
         for t, n in insufficient.items():
             print(f"  - {t}: {n} phiên")
+
+    # --- Loại bỏ dòng trùng lặp (cùng ngày + cùng mã) trước khi lưu ---
+    # Một số nguồn dữ liệu đôi khi trả về 2 dòng cho cùng 1 phiên (vd: dữ liệu "tạm"
+    # lúc thị trường chưa đóng cửa rồi được cập nhật lại) -> gây lỗi khi tính toán sau này.
+    before_dedup = len(price_df)
+    price_df = price_df.sort_values("date").drop_duplicates(subset=["date", "ticker"], keep="last")
+    removed = before_dedup - len(price_df)
+    if removed > 0:
+        print(f"\nĐã loại bỏ {removed} dòng trùng lặp (cùng ngày + cùng mã).")
 
     price_df.to_csv(OUTPUT_FILE, index=False)
     print(f"\nĐã lưu file {OUTPUT_FILE}")
