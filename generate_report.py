@@ -87,11 +87,27 @@ def build_chart_data(df: pd.DataFrame):
     return chart_data, has_ohlc, has_volume
 
 
-def compute_index_series(sub_df: pd.DataFrame):
-    """Tính chỉ số tổng hợp trọng số dòng tiền cho 1 rổ mã (toàn thị trường hoặc 1 ngành).
-    sub_df cần có cột: date, ticker, close, volume.
-    Trả về list [[time_str, index_value], ...], mốc 1000 tại phiên đầu tiên.
-    Mã thiếu dữ liệu ngày nào bị loại khỏi tính trọng số ngày đó (không làm hỏng cả index)."""
+INDEX_SMOOTH_WINDOW = 20  # m phiên - chu kỳ làm mượt SMA cho trọng số dòng tiền
+
+
+def compute_index_series(sub_df: pd.DataFrame, smooth_window: int = INDEX_SMOOTH_WINDOW):
+    """Tính chỉ số tổng hợp trọng số dòng tiền (đã làm mượt) cho 1 rổ mã (toàn thị trường
+    hoặc 1 ngành). sub_df cần có cột: date, ticker, close, volume.
+
+    Công thức (bản cải tiến, làm mượt):
+      T_i = SMA(P_i * V_i, m)          # trung bình trượt m phiên, khử nhiễu
+      W_i = T_i / sum(T_k)
+      %ΔP_i = (P_i - P_trước,i) / P_trước,i
+      %ΔIndex = sum(W_i * %ΔP_i)
+      Index = Index_trước * (1 + %ΔIndex), mốc 1000 tại phiên đầu
+
+    Trả về (index_series, volume_series):
+      index_series:  [[time_str, index_value], ...]
+      volume_series: [[time_str, tổng_giá_trị_giao_dịch_ngày_đó], ...] (chưa làm mượt,
+                      dùng để hiển thị dạng cột khối lượng bên dưới biểu đồ)
+
+    Mã thiếu dữ liệu ngày nào bị loại khỏi tính trọng số ngày đó (không làm hỏng cả index).
+    """
     close_pivot = sub_df.pivot(index="date", columns="ticker", values="close").sort_index()
     volume_pivot = sub_df.pivot(index="date", columns="ticker", values="volume").sort_index()
 
@@ -100,29 +116,71 @@ def compute_index_series(sub_df: pd.DataFrame):
     # việc đó vẫn dựa trên close_pivot/volume_pivot gốc (có NaN thật) để loại đúng mã thiếu
     # dữ liệu khỏi trọng số của đúng ngày đó.
     pct_change = close_pivot.ffill().pct_change(fill_method=None)
-    value_traded = close_pivot * volume_pivot
+    raw_value_traded = close_pivot * volume_pivot  # T_i thô - dùng để hiển thị cột khối lượng
+    smoothed_value_traded = raw_value_traded.rolling(
+        window=smooth_window, min_periods=1
+    ).mean()  # T_i đã làm mượt (SMA) - dùng để tính trọng số W_i
 
     dates = close_pivot.index
-    result = []
+    index_result = []
+    volume_result = []
     current = 1000.0
     for i in range(len(dates)):
         d = dates[i]
+        day_total_raw = raw_value_traded.iloc[i].sum(skipna=True)
+        volume_result.append([d.strftime("%Y-%m-%d"), round(float(day_total_raw), 0) if pd.notna(day_total_raw) else 0])
+
         if i == 0:
-            result.append([d.strftime("%Y-%m-%d"), round(current, 2)])
+            index_result.append([d.strftime("%Y-%m-%d"), round(current, 2)])
             continue
         row_pct = pct_change.iloc[i]
-        row_val = value_traded.iloc[i]
+        row_val = smoothed_value_traded.iloc[i]
         valid = row_pct.notna() & row_val.notna() & (row_val > 0)
         if valid.sum() > 0:
             w = row_val[valid] / row_val[valid].sum()
             pct_idx = (w * row_pct[valid]).sum()
             current = current * (1 + pct_idx)
-        result.append([d.strftime("%Y-%m-%d"), round(current, 2)])
+        index_result.append([d.strftime("%Y-%m-%d"), round(current, 2)])
+    return index_result, volume_result
+
+
+def compute_rebased_series(price_df: pd.DataFrame):
+    """Quy đổi 1 chuỗi giá (vd VNINDEX) về mốc 1000 dựa trên %Δ giá thật mỗi phiên,
+    để so sánh xu hướng cùng thang với chỉ số dòng tiền tự tính.
+    price_df cần có cột date, close (1 mã duy nhất)."""
+    d = price_df.sort_values("date").reset_index(drop=True)
+    pct_change = d["close"].pct_change()
+    result = []
+    current = 1000.0
+    for i in range(len(d)):
+        date_str = d.loc[i, "date"].strftime("%Y-%m-%d")
+        if i == 0:
+            result.append([date_str, round(current, 2)])
+            continue
+        p = pct_change.iloc[i]
+        if pd.notna(p):
+            current = current * (1 + p)
+        result.append([date_str, round(current, 2)])
     return result
 
 
 def main():
-    df = pd.read_csv(INPUT_FILE, parse_dates=["date"])
+    df = pd.read_csv(INPUT_FILE, parse_dates=["date"], low_memory=False)
+
+    # --- Loại bỏ dòng trùng lặp (cùng ngày + cùng mã) ngay từ đầu ---
+    # Bảo vệ mọi bước tính toán phía sau (groupby, pivot...) khỏi lỗi nếu dữ liệu đầu vào
+    # lỡ có dòng trùng (do fetch_data.py cũ chưa lọc, hoặc chỉnh sửa tay CSV).
+    before_dedup = len(df)
+    df = df.sort_values("date").drop_duplicates(subset=["date", "ticker"], keep="last")
+    removed = before_dedup - len(df)
+    if removed > 0:
+        print(f"Đã loại bỏ {removed} dòng trùng lặp (cùng ngày + cùng mã) trong {INPUT_FILE}.")
+
+    # --- Tách VNINDEX (chỉ số tham chiếu) ra khỏi dữ liệu cổ phiếu ---
+    # VNINDEX không phải cổ phiếu, không thuộc ngành nào -> không được lẫn vào tính RS,
+    # bảng xếp hạng, hay popup ngành/nhóm. Chỉ dùng riêng để vẽ đường so sánh trên biểu đồ Index.
+    vnindex_df = df[df["ticker"] == "VNINDEX"].copy()
+    df = df[df["ticker"] != "VNINDEX"].copy()
 
     records = []
     for ticker, g in df.groupby("ticker"):
@@ -175,17 +233,23 @@ def main():
 
     chart_data, has_ohlc, has_volume = build_chart_data(df)
 
-    # --- Chỉ số tổng hợp trọng số dòng tiền (toàn thị trường + từng ngành) ---
+    # --- Chỉ số tổng hợp trọng số dòng tiền (đã làm mượt) - toàn thị trường + từng ngành ---
     index_data = {}
     if has_volume:
-        index_data["Toàn thị trường"] = compute_index_series(df[["date", "ticker", "close", "volume"]])
+        idx_series, vol_series = compute_index_series(df[["date", "ticker", "close", "volume"]])
+        index_data["Toàn thị trường"] = {"index": idx_series, "volume": vol_series}
         for nganh in sorted(df["industry"].dropna().unique()):
             sub = df[df["industry"] == nganh][["date", "ticker", "close", "volume"]]
             if sub["ticker"].nunique() < 1:
                 continue
-            series = compute_index_series(sub)
-            if series:
-                index_data[nganh] = series
+            idx_series, vol_series = compute_index_series(sub)
+            if idx_series:
+                index_data[nganh] = {"index": idx_series, "volume": vol_series}
+
+    # --- VNINDEX quy đổi mốc 1000 để so sánh cùng thang với chỉ số tự tính ---
+    vnindex_series = []
+    if not vnindex_df.empty:
+        vnindex_series = compute_rebased_series(vnindex_df[["date", "close"]])
 
     def rs_color(rs):
         if rs >= 80:
@@ -232,9 +296,14 @@ def main():
 
     # --- Khu vực Chỉ số dòng tiền (chỉ hiện nếu có volume) ---
     if index_data:
-        index_section_html = """
+        vn_hint = (
+            ' · <span style="color:#f59e0b">- - -</span> VNIndex thật (quy đổi mốc 1000 để so sánh xu hướng)'
+            if vnindex_series else ""
+        )
+        index_section_html = f"""
   <div class="section-title">📊 Chỉ số dòng tiền (Money-flow Weighted Index)</div>
-  <div class="hint">Mốc khởi điểm 1000 điểm tại phiên đầu tiên có dữ liệu. Trọng số mỗi mã theo giá trị giao dịch (giá × khối lượng) trong ngày.</div>
+  <div class="hint">Mốc khởi điểm 1000 điểm tại phiên đầu tiên có dữ liệu. Trọng số mỗi mã = SMA({INDEX_SMOOTH_WINDOW} phiên) của giá trị giao dịch (giá × khối lượng) — đã làm mượt để giảm nhiễu.</div>
+  <div class="hint"><span style="color:#60a5fa">—</span> Chỉ số tự tính{vn_hint} · cột xám bên dưới = tổng giá trị giao dịch mỗi phiên</div>
   <select id="index-select" class="index-select"></select>
   <div id="index-chart-container"></div>
 """
@@ -245,6 +314,7 @@ def main():
     chart_data_json = json.dumps(chart_data, ensure_ascii=False)
     group_data_json = json.dumps(group_data, ensure_ascii=False)
     index_data_json = json.dumps(index_data, ensure_ascii=False)
+    vnindex_json = json.dumps(vnindex_series, ensure_ascii=False)
     has_ohlc_json = "true" if has_ohlc else "false"
     has_volume_json = "true" if has_volume else "false"
 
@@ -397,6 +467,7 @@ def main():
 const CHART_DATA = {chart_data_json};
 const GROUP_DATA = {group_data_json};
 const INDEX_DATA = {index_data_json};
+const VNINDEX_DATA = {vnindex_json};
 const HAS_OHLC = {has_ohlc_json};
 const HAS_VOLUME = {has_volume_json};
 
@@ -584,9 +655,12 @@ function showGroupPopup(name) {{
 
 // ---------- Chỉ số dòng tiền (Money-flow Weighted Index) ----------
 function renderIndexChart(name) {{
-  const data = INDEX_DATA[name];
+  const entry = INDEX_DATA[name];
   const container = document.getElementById('index-chart-container');
-  if (!data || !container) return;
+  if (!entry || !container) return;
+  const data = entry.index;
+  const volData = entry.volume || [];
+
   container.innerHTML = '';
   if (indexChart) {{ indexChart.remove(); }}
 
@@ -596,12 +670,37 @@ function renderIndexChart(name) {{
     layout: {{ background: {{ color: '#1e293b' }}, textColor: '#cbd5e1' }},
     grid: {{ vertLines: {{ color: '#334155' }}, horzLines: {{ color: '#334155' }} }},
     timeScale: {{ borderColor: '#475569' }},
-    rightPriceScale: {{ borderColor: '#475569' }},
+    rightPriceScale: {{
+      borderColor: '#475569',
+      scaleMargins: volData.length ? {{ top: 0.1, bottom: 0.3 }} : {{ top: 0.1, bottom: 0.1 }},
+    }},
   }});
+
   const series = indexChart.addAreaSeries({{
-    lineColor: '#60a5fa', topColor: 'rgba(96,165,250,0.3)', bottomColor: 'rgba(96,165,250,0.0)', lineWidth: 2,
+    lineColor: '#60a5fa', topColor: 'rgba(96,165,250,0.3)', bottomColor: 'rgba(96,165,250,0.0)',
+    lineWidth: 2, title: name,
   }});
   series.setData(data.map(d => ({{ time: d[0], value: d[1] }})));
+
+  // Đường VNIndex (quy đổi mốc 1000) chồng lên để so sánh, nếu có dữ liệu
+  if (VNINDEX_DATA && VNINDEX_DATA.length) {{
+    const vnSeries = indexChart.addLineSeries({{
+      color: '#f59e0b', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'VNIndex',
+    }});
+    vnSeries.setData(VNINDEX_DATA.map(d => ({{ time: d[0], value: d[1] }})));
+  }}
+
+  // Cột tổng giá trị giao dịch (Σ giá×khối lượng mỗi ngày) bên dưới đường Index
+  if (volData.length) {{
+    const volSeries = indexChart.addHistogramSeries({{
+      priceFormat: {{ type: 'volume' }},
+      priceScaleId: 'index-volume',
+      color: 'rgba(148,163,184,0.5)',
+    }});
+    indexChart.priceScale('index-volume').applyOptions({{ scaleMargins: {{ top: 0.8, bottom: 0 }} }});
+    volSeries.setData(volData.map(d => ({{ time: d[0], value: d[1] }})));
+  }}
+
   indexChart.timeScale().fitContent();
 }}
 
