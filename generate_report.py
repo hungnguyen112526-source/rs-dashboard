@@ -19,6 +19,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone, timedelta
 
+VN_TZ = timezone(timedelta(hours=7))  # giờ Việt Nam (UTC+7) - máy chủ GitHub Actions chạy giờ UTC
+
 INPUT_FILE = "gia_lich_su_rs.csv"
 OUTPUT_FILE = "docs/index.html"
 
@@ -28,15 +30,11 @@ GITHUB_REPO = "rs-dashboard"
 WORKFLOW_FILE = "update_data.yml"
 ACTIONS_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/{WORKFLOW_FILE}"
 
-VN_TZ = timezone(timedelta(hours=7))  # giờ Việt Nam (UTC+7) - GitHub Actions chạy theo giờ UTC
-
 BLOCK_SIZE = 30  # dữ liệu theo NGÀY (phiên giao dịch) -> đúng 30 phiên/khối theo công thức gốc
+BLOCK_SIZE_WEEKLY = 20  # RS khung tuần: 20 tuần/khối (giữ nguyên trọng số 0.4/0.3/0.2/0.1)
 BLOCK_WEIGHTS = [0.4, 0.3, 0.2, 0.1]
 DATA_UNIT = "phiên"
-
-WEEKLY_BLOCK_SIZE = 20  # dữ liệu theo TUẦN (gộp từ dữ liệu ngày có sẵn) -> 20 tuần/khối
 WEEKLY_UNIT = "tuần"
-WEEKLY_MIN_SESSIONS = WEEKLY_BLOCK_SIZE * 4  # 80 tuần (~1.5 năm)
 
 
 def block_period_label(block_index, block_size=BLOCK_SIZE, unit=DATA_UNIT):
@@ -64,6 +62,51 @@ def raw_score_to_rs(raw_scores):
     rank = raw_scores.rank(method="min", ascending=False)
     rs = ((n - rank) / n) * 99 + 1
     return rs.round(0).astype(int)
+
+
+def aggregate_weekly_prices(df: pd.DataFrame):
+    """Gộp giá đóng cửa theo tuần (mốc Thứ 2 đầu tuần) cho từng mã, dùng để tính RS khung tuần.
+    Trả về DataFrame với các cột: date (= Thứ 2 của tuần), ticker, close, industry."""
+    d = df.copy()
+    d["date"] = d["date"] - pd.to_timedelta(d["date"].dt.weekday, unit="D")
+    weekly = (
+        d.sort_values("date")
+        .groupby(["ticker", "date"], as_index=False)
+        .agg(close=("close", "last"), industry=("industry", "last"))
+    )
+    return weekly
+
+
+def compute_rs_scores(price_df: pd.DataFrame, block_size: int, block_weights=BLOCK_WEIGHTS):
+    """Tính bảng điểm RS (cổ phiếu + ngành) từ dữ liệu giá (daily hoặc weekly).
+    Trả về (scores, industry_df) - cả 2 đều None nếu không có mã nào đủ dữ liệu."""
+    records = []
+    for ticker, g in price_df.groupby("ticker"):
+        g = g.sort_values("date")
+        prices = g["close"].reset_index(drop=True)
+        block_returns = [block_return(prices, i, block_size=block_size) for i in range(1, len(block_weights) + 1)]
+        if any(pd.isna(r) for r in block_returns):
+            continue
+        raw_score = sum(w * r for w, r in zip(block_weights, block_returns))
+        record = {"ticker": ticker, "raw_score": raw_score}
+        for i, r in enumerate(block_returns, start=1):
+            record[f"pct_block{i}"] = r
+        records.append(record)
+
+    if not records:
+        return None, None
+
+    scores = pd.DataFrame(records)
+    industry_map = price_df.drop_duplicates("ticker").set_index("ticker")["industry"]
+    scores["industry"] = scores["ticker"].map(industry_map)
+    scores["RS"] = raw_score_to_rs(scores["raw_score"])
+    scores = scores.sort_values("RS", ascending=False)
+
+    industry_raw = scores.groupby("industry")["raw_score"].mean().rename("industry_raw_score")
+    industry_df = industry_raw.reset_index()
+    industry_df["RS_nganh"] = raw_score_to_rs(industry_df["industry_raw_score"])
+    industry_df = industry_df.sort_values("RS_nganh", ascending=False)
+    return scores, industry_df
 
 
 def build_chart_data(df: pd.DataFrame):
@@ -150,34 +193,12 @@ def compute_index_series(sub_df: pd.DataFrame, smooth_window: int = INDEX_SMOOTH
     return index_result, volume_result
 
 
-def build_real_series(price_df: pd.DataFrame):
-    """Chuỗi giá trị THỰC (không quy đổi mốc), dùng để vẽ VNIndex trên trục phụ riêng
-    (secondary axis) cạnh chỉ số dòng tiền tự tính. price_df cần có cột date, close
-    (1 mã duy nhất)."""
-    d = price_df.sort_values("date").reset_index(drop=True)
-    return [
-        [d.loc[i, "date"].strftime("%Y-%m-%d"), round(float(d.loc[i, "close"]), 2)]
-        for i in range(len(d))
-    ]
-
-
-def resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
-    """Gộp dữ liệu giá THEO NGÀY thành nến TUẦN (kết thúc thứ Sáu, đúng tuần giao dịch VN),
-    lấy giá đóng cửa cuối tuần làm giá đại diện. Dùng để tính RS khung tuần mà không cần
-    gọi API riêng - tái sử dụng dữ liệu ngày đã có trong gia_lich_su_rs.csv.
-    df cần có cột: date, ticker, close. Trả về DataFrame cột: ticker, date, close."""
-    # reset_index(drop=True): groupby(...).resample(..., on=...) của pandas cho kết quả SAI
-    # (thiếu dữ liệu) nếu index của df đầu vào không liền mạch/không theo đúng thứ tự nhóm
-    # (dễ xảy ra vì df đã qua sort_values + drop_duplicates trước đó trong main()).
-    df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
-    weekly = (
-        df.groupby("ticker")
-        .resample("W-FRI", on="date")["close"]
-        .last()
-        .dropna()
-        .reset_index()
-    )
-    return weekly
+def extract_real_series(price_df: pd.DataFrame):
+    """Trích xuất chuỗi giá THẬT (không quy đổi mốc) của 1 mã/chỉ số (vd VNINDEX),
+    dùng để vẽ trên trục riêng, hiển thị đúng điểm số thực tế ngoài thị trường.
+    price_df cần có cột date, close (1 mã duy nhất)."""
+    d = price_df.sort_values("date").dropna(subset=["close"])
+    return [[row["date"].strftime("%Y-%m-%d"), round(float(row["close"]), 2)] for _, row in d.iterrows()]
 
 
 def main():
@@ -198,94 +219,48 @@ def main():
     vnindex_df = df[df["ticker"] == "VNINDEX"].copy()
     df = df[df["ticker"] != "VNINDEX"].copy()
 
-    records = []
-    for ticker, g in df.groupby("ticker"):
-        g = g.sort_values("date")
-        prices = g["close"].reset_index(drop=True)
-        block_returns = [block_return(prices, i) for i in range(1, len(BLOCK_WEIGHTS) + 1)]
-        if any(pd.isna(r) for r in block_returns):
-            continue
-        raw_score = sum(w * r for w, r in zip(BLOCK_WEIGHTS, block_returns))
-        record = {"ticker": ticker, "raw_score": raw_score}
-        for i, r in enumerate(block_returns, start=1):
-            record[f"pct_block{i}"] = r
-        records.append(record)
-
-    scores = pd.DataFrame(records)
-    if scores.empty:
+    scores_daily, industry_df_daily = compute_rs_scores(df, BLOCK_SIZE)
+    if scores_daily is None:
         raise SystemExit(
             f"Không có mã nào đủ dữ liệu để tính RS. "
             f"Cần tối thiểu {BLOCK_SIZE * len(BLOCK_WEIGHTS)} dòng dữ liệu/mã "
             f"(hiện BLOCK_SIZE={BLOCK_SIZE}). Hãy kiểm tra lại {INPUT_FILE}."
         )
-    industry_map = df.drop_duplicates("ticker").set_index("ticker")["industry"]
-    scores["industry"] = scores["ticker"].map(industry_map)
-    scores["RS"] = raw_score_to_rs(scores["raw_score"])
-    scores = scores.sort_values("RS", ascending=False)
+
+    # --- RS khung tuần: gộp giá theo tuần rồi tính lại y hệt công thức, chỉ đổi block_size ---
+    weekly_prices = aggregate_weekly_prices(df)
+    scores_weekly, industry_df_weekly = compute_rs_scores(weekly_prices, BLOCK_SIZE_WEEKLY)
+    has_weekly_rs = scores_weekly is not None
+    if not has_weekly_rs:
+        print(
+            f"Lưu ý: không đủ dữ liệu để tính RS khung tuần "
+            f"(cần tối thiểu {BLOCK_SIZE_WEEKLY * len(BLOCK_WEIGHTS)} tuần/mã) - bỏ qua bảng RS tuần."
+        )
 
     # Cột "nhom" (tập đoàn) là tuỳ chọn, chỉ dùng để mở popup xem biểu đồ theo tập đoàn -
     # KHÔNG tham gia tính RS Ngành (khác với "industry" ở trên).
     has_nhom = "nhom" in df.columns
     if has_nhom:
         nhom_map = df.drop_duplicates("ticker").set_index("ticker")["nhom"]
-        scores["nhom"] = scores["ticker"].map(nhom_map)
+        scores_daily["nhom"] = scores_daily["ticker"].map(nhom_map)
+        if has_weekly_rs:
+            scores_weekly["nhom"] = scores_weekly["ticker"].map(nhom_map)
 
-    industry_raw = scores.groupby("industry")["raw_score"].mean().rename("industry_raw_score")
-    industry_df = industry_raw.reset_index()
-    industry_df["RS_nganh"] = raw_score_to_rs(industry_df["industry_raw_score"])
-    industry_df = industry_df.sort_values("RS_nganh", ascending=False)
-
-    # --- RS khung TUẦN: gộp dữ liệu ngày có sẵn thành tuần, tính lại theo cùng công thức
-    # (4 khối, trọng số 0.4/0.3/0.2/0.1) nhưng block_size = WEEKLY_BLOCK_SIZE tuần/khối ---
-    weekly_df = resample_weekly(df[["date", "ticker", "close"]])
-    weekly_records = []
-    for ticker, g in weekly_df.groupby("ticker"):
-        g = g.sort_values("date")
-        prices = g["close"].reset_index(drop=True)
-        block_returns = [
-            block_return(prices, i, block_size=WEEKLY_BLOCK_SIZE) for i in range(1, len(BLOCK_WEIGHTS) + 1)
-        ]
-        if any(pd.isna(r) for r in block_returns):
-            continue
-        raw_score = sum(w * r for w, r in zip(BLOCK_WEIGHTS, block_returns))
-        record = {"ticker": ticker, "raw_score": raw_score}
-        for i, r in enumerate(block_returns, start=1):
-            record[f"pct_block{i}"] = r
-        weekly_records.append(record)
-
-    scores_weekly = pd.DataFrame(weekly_records)
-    has_weekly_rs = not scores_weekly.empty
-    if has_weekly_rs:
-        scores_weekly["industry"] = scores_weekly["ticker"].map(industry_map)
-        scores_weekly["RS"] = raw_score_to_rs(scores_weekly["raw_score"])
-        scores_weekly = scores_weekly.sort_values("RS", ascending=False)
-
-        industry_raw_w = scores_weekly.groupby("industry")["raw_score"].mean().rename("industry_raw_score")
-        industry_df_weekly = industry_raw_w.reset_index()
-        industry_df_weekly["RS_nganh"] = raw_score_to_rs(industry_df_weekly["industry_raw_score"])
-        industry_df_weekly = industry_df_weekly.sort_values("RS_nganh", ascending=False)
-    else:
-        industry_df_weekly = pd.DataFrame(columns=["industry", "industry_raw_score", "RS_nganh"])
-        print(
-            f"CẢNH BÁO: không đủ {WEEKLY_MIN_SESSIONS} tuần dữ liệu cho bất kỳ mã nào "
-            f"-> bỏ qua bảng RS khung tuần."
-        )
-
-    # --- Danh sách mã theo Ngành / Nhóm, sắp theo RS giảm dần (dùng cho popup) ---
+    # --- Danh sách mã theo Ngành / Nhóm, sắp theo RS giảm dần (dùng cho popup - luôn theo RS ngày) ---
     industry_tickers = {}
-    for _, r in scores.iterrows():
+    for _, r in scores_daily.iterrows():
         industry_tickers.setdefault(r["industry"], []).append({"ticker": r["ticker"], "rs": int(r["RS"])})
 
     group_tickers = {}
     if has_nhom:
-        for _, r in scores.dropna(subset=["nhom"]).iterrows():
+        for _, r in scores_daily.dropna(subset=["nhom"]).iterrows():
             group_tickers.setdefault(r["nhom"], []).append({"ticker": r["ticker"], "rs": int(r["RS"])})
 
     group_data = {**industry_tickers, **group_tickers}
 
     chart_data, has_ohlc, has_volume = build_chart_data(df)
 
-    # --- Chỉ số tổng hợp trọng số dòng tiền (đã làm mượt) - toàn thị trường + từng ngành ---
+    # --- Chỉ số tổng hợp trọng số dòng tiền (đã làm mượt) - toàn thị trường + từng ngành + nhóm ---
     index_data = {}
     if has_volume:
         idx_series, vol_series = compute_index_series(df[["date", "ticker", "close", "volume"]])
@@ -297,12 +272,19 @@ def main():
             idx_series, vol_series = compute_index_series(sub)
             if idx_series:
                 index_data[nganh] = {"index": idx_series, "volume": vol_series}
+        if has_nhom:
+            for nhom_name in sorted(df["nhom"].dropna().unique()):
+                sub = df[df["nhom"] == nhom_name][["date", "ticker", "close", "volume"]]
+                if sub["ticker"].nunique() < 1:
+                    continue
+                idx_series, vol_series = compute_index_series(sub)
+                if idx_series:
+                    index_data[nhom_name] = {"index": idx_series, "volume": vol_series}
 
-    # --- VNINDEX giá trị thực, vẽ trên trục phụ (secondary axis) riêng để không lệch
-    # thang so với chỉ số dòng tiền tự tính (vốn quy đổi mốc 1000) ---
+    # --- VNINDEX: hiển thị điểm số THẬT (không quy đổi mốc), vẽ trên trục riêng để so sánh ---
     vnindex_series = []
     if not vnindex_df.empty:
-        vnindex_series = build_real_series(vnindex_df[["date", "close"]])
+        vnindex_series = extract_real_series(vnindex_df[["date", "close"]])
 
     def rs_color(rs):
         if rs >= 80:
@@ -336,62 +318,15 @@ def main():
             </tr>"""
         return rows
 
-    def render_ranking_panel(panel_id, active, block_size, unit, min_required_hint, stock_df, industry_df_):
-        """Dựng khối HTML: formula-box + bảng xếp hạng cổ phiếu + bảng xếp hạng ngành,
-        dùng chung cho cả khung ngày và khung tuần (chỉ khác block_size/unit/dữ liệu)."""
-        display_style = "" if active else ' style="display:none"'
-        labels = [block_period_label(i, block_size=block_size, unit=unit) for i in range(1, 5)]
-        return f"""
-  <div id="{panel_id}" class="tf-panel"{display_style}>
-  <div class="formula-box">
-    <div class="formula-title">📐 Công thức xếp hạng RS (khung {unit})</div>
-    <ol class="formula-list">
-      <li>Chia dữ liệu giá thành <b>4 khối</b>, mỗi khối <b>{block_size} {unit}</b> liên tiếp, không chồng lấn (Khối 1 = {block_size} {unit} gần nhất, ... Khối 4 = {block_size} {unit} xa nhất).</li>
-      <li>Tính <b>% thay đổi giá</b> của từng khối: %Δ = (Giá cuối khối − Giá đầu khối) / Giá đầu khối.</li>
-      <li>Tính <b>Điểm thô</b> mỗi mã = 0.4×%Δ(Khối 1) + 0.3×%Δ(Khối 2) + 0.2×%Δ(Khối 3) + 0.1×%Δ(Khối 4) — khối gần nhất có trọng số cao nhất.</li>
-      <li>Xếp hạng tất cả mã theo Điểm thô (cao → thấp), quy đổi <b>RS cổ phiếu</b> (thang 1–99) = ((N − hạng) / N) × 99 + 1, với N = tổng số mã.</li>
-      <li><b>Điểm thô Ngành</b> = trung bình cộng Điểm thô của các mã trong ngành.</li>
-      <li>Áp dụng lại bước 4 cho các ngành để ra <b>RS Ngành</b> (thang 1–99), với M = tổng số ngành.</li>
-    </ol>
-    <div class="formula-note">{min_required_hint}</div>
-  </div>
-
-  <div class="section-title">🏆 Xếp hạng cổ phiếu (khung {unit})</div>
-  <div class="hint">Bấm vào mã để xem biểu đồ giá · Bấm vào tên ngành để xem biểu đồ tất cả mã trong ngành</div>
-  <div class="hint">* Điểm thô = 0.4×(khối gần nhất) + 0.3×(khối tiếp theo) + 0.2×(khối kế) + 0.1×(khối xa nhất) — khối gần nhất được tính trọng số cao nhất vì phản ánh xu hướng giá mới nhất</div>
-  <table>
-    <tr><th>Mã</th><th>Ngành</th><th>{labels[0]}</th><th>{labels[1]}</th><th>{labels[2]}</th><th>{labels[3]}</th><th>Điểm thô*</th><th>RS</th></tr>
-    {stock_rows(stock_df)}
-  </table>
-
-  <div class="section-title">🏭 Xếp hạng ngành (khung {unit})</div>
-  <div class="hint">Bấm vào tên ngành để xem biểu đồ tất cả mã trong ngành</div>
-  <table>
-    <tr><th>Ngành</th><th>Điểm thô Ngành</th><th>RS Ngành</th></tr>
-    {industry_rows(industry_df_)}
-  </table>
-  </div>"""
-
-    day_panel_html = render_ranking_panel(
-        "tf-panel-day", True, BLOCK_SIZE, DATA_UNIT,
-        f"Cần tối thiểu {BLOCK_SIZE * len(BLOCK_WEIGHTS)} phiên giao dịch (~6 tháng) mỗi mã để tính đủ 4 khối.",
-        scores, industry_df,
-    )
-
-    if has_weekly_rs:
-        week_panel_html = render_ranking_panel(
-            "tf-panel-week", False, WEEKLY_BLOCK_SIZE, WEEKLY_UNIT,
-            f"Cần tối thiểu {WEEKLY_MIN_SESSIONS} tuần giao dịch (~1.5 năm) mỗi mã để tính đủ 4 khối.",
-            scores_weekly, industry_df_weekly,
+    def stock_table_header(block_size, unit):
+        return (
+            f"<tr><th>Mã</th><th>Ngành</th>"
+            f"<th>{block_period_label(1, block_size, unit)}</th>"
+            f"<th>{block_period_label(2, block_size, unit)}</th>"
+            f"<th>{block_period_label(3, block_size, unit)}</th>"
+            f"<th>{block_period_label(4, block_size, unit)}</th>"
+            f"<th>Điểm thô*</th><th>RS</th></tr>"
         )
-        ranking_toggle_html = """
-  <div class="tf-toggle-row">
-    <button class="tf-toggle-btn tf-toggle-active" onclick="switchRankingTimeframe('day', this)">Khung ngày</button>
-    <button class="tf-toggle-btn" onclick="switchRankingTimeframe('week', this)">Khung tuần</button>
-  </div>"""
-    else:
-        week_panel_html = ""
-        ranking_toggle_html = ""
 
     # --- Khu vực link "Xem theo tập đoàn" (chỉ hiện nếu có dữ liệu nhóm) ---
     group_names = sorted(group_tickers.keys())
@@ -407,20 +342,20 @@ def main():
     # --- Khu vực Chỉ số dòng tiền (chỉ hiện nếu có volume) ---
     if index_data:
         vn_hint = (
-            ' · <span style="color:#f59e0b">- - -</span> VNIndex thực (trục phụ bên trái, không quy đổi)'
+            ' · <span style="color:#f59e0b">- - -</span> VNIndex thật (trục trái, điểm số thực tế)'
             if vnindex_series else ""
         )
         index_section_html = f"""
   <div class="section-title">📊 Chỉ số dòng tiền (Money-flow Weighted Index)</div>
-  <div class="hint">Mốc khởi điểm 1000 điểm tại phiên đầu tiên có dữ liệu. Trọng số mỗi mã = SMA({INDEX_SMOOTH_WINDOW} phiên) của giá trị giao dịch (giá × khối lượng) — đã làm mượt để giảm nhiễu.</div>
-  <div class="hint"><span style="color:#60a5fa">—</span> Chỉ số tự tính{vn_hint} · cột xám bên dưới = tổng giá trị giao dịch mỗi phiên</div>
+  <div class="hint">Chỉ số tự tính: mốc khởi điểm 1000 điểm tại phiên đầu tiên có dữ liệu (trục phải). Trọng số mỗi mã = SMA({INDEX_SMOOTH_WINDOW} phiên) của giá trị giao dịch (giá × khối lượng) — đã làm mượt để giảm nhiễu.</div>
+  <div class="hint"><span style="color:#60a5fa">—</span> Chỉ số tự tính (trục phải){vn_hint} · cột xám bên dưới = tổng giá trị giao dịch mỗi phiên</div>
   <select id="index-select" class="index-select"></select>
   <div id="index-chart-container"></div>
 """
     else:
         index_section_html = ""
 
-    updated_at = datetime.now(timezone.utc).astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M")
+    updated_at = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M")
     chart_data_json = json.dumps(chart_data, ensure_ascii=False)
     group_data_json = json.dumps(group_data, ensure_ascii=False)
     index_data_json = json.dumps(index_data, ensure_ascii=False)
@@ -452,13 +387,6 @@ def main():
   .group-links-row {{ color:#93c5fd; font-size:13px; margin: 0 0 24px; }}
   .group-link {{ cursor:pointer; text-decoration:underline dotted; }}
   .group-link:hover {{ color:#bfdbfe; }}
-  .tf-toggle-row {{ display:flex; gap:8px; margin: 4px 0 20px; }}
-  .tf-toggle-btn {{
-    background:#334155; border:none; color:#94a3b8; font-size:14px; font-weight:600;
-    padding:8px 18px; border-radius:8px; cursor:pointer;
-  }}
-  .tf-toggle-btn:hover {{ background:#475569; }}
-  .tf-toggle-active {{ background:#2563eb; color:#fff; }}
   .formula-box {{ background:#1e293b; border:1px solid #334155; border-radius:10px; padding:16px 20px; margin-bottom:28px; }}
   .formula-title {{ font-size:15px; font-weight:600; margin-bottom:10px; color:#e2e8f0; }}
   .formula-list {{ margin:0; padding-left:20px; color:#cbd5e1; font-size:13px; line-height:1.7; }}
@@ -518,6 +446,9 @@ def main():
   }}
   .tf-btn:hover {{ background:#475569; }}
   .tf-btn.tf-active {{ background:#2563eb; color:#fff; }}
+  .tf-btn:disabled {{ opacity:0.4; cursor:not-allowed; }}
+  .rs-tf-toolbar {{ display:flex; gap:6px; margin-bottom:12px; }}
+  .rs-tf-toolbar .tf-btn {{ font-size:13px; padding:6px 16px; }}
 </style>
 </head>
 <body>
@@ -530,9 +461,47 @@ def main():
   <div class="updated">Cập nhật lần cuối: {updated_at}</div>
   <div class="refresh-hint">Nút trên mở trang GitHub Actions — bấm "Run workflow" ở đó để lấy dữ liệu mới nhất và tính lại RS ngay (cần đăng nhập GitHub với quyền chủ repo).</div>
   {group_links_html}
-  {ranking_toggle_html}
-  {day_panel_html}
-  {week_panel_html}
+
+  <div class="formula-box">
+    <div class="formula-title">📐 Công thức xếp hạng RS</div>
+    <ol class="formula-list">
+      <li>Chia dữ liệu giá thành <b>4 khối</b>, mỗi khối <b>30 phiên giao dịch</b> liên tiếp, không chồng lấn (Khối 1 = 30 phiên gần nhất, ... Khối 4 = 30 phiên xa nhất).</li>
+      <li>Tính <b>% thay đổi giá</b> của từng khối: %Δ = (Giá cuối khối − Giá đầu khối) / Giá đầu khối.</li>
+      <li>Tính <b>Điểm thô</b> mỗi mã = 0.4×%Δ(Khối 1) + 0.3×%Δ(Khối 2) + 0.2×%Δ(Khối 3) + 0.1×%Δ(Khối 4) — khối gần nhất có trọng số cao nhất.</li>
+      <li>Xếp hạng tất cả mã theo Điểm thô (cao → thấp), quy đổi <b>RS cổ phiếu</b> (thang 1–99) = ((N − hạng) / N) × 99 + 1, với N = tổng số mã.</li>
+      <li><b>Điểm thô Ngành</b> = trung bình cộng Điểm thô của các mã trong ngành.</li>
+      <li>Áp dụng lại bước 4 cho các ngành để ra <b>RS Ngành</b> (thang 1–99), với M = tổng số ngành.</li>
+    </ol>
+    <div class="formula-note">Cần tối thiểu 120 phiên giao dịch (~6 tháng) mỗi mã để tính đủ 4 khối.</div>
+  </div>
+
+  <div class="section-title">🏆 Xếp hạng cổ phiếu</div>
+  <div class="hint">Bấm vào mã để xem biểu đồ giá · Bấm vào tên ngành để xem biểu đồ tất cả mã trong ngành</div>
+  <div class="hint">* Điểm thô = 0.4×(khối gần nhất) + 0.3×(khối tiếp theo) + 0.2×(khối kế) + 0.1×(khối xa nhất) — khối gần nhất được tính trọng số cao nhất vì phản ánh xu hướng giá mới nhất</div>
+  <div class="rs-tf-toolbar">
+    <button class="tf-btn tf-active" id="rs-btn-D" onclick="setRSTimeframe('D')">Ngày</button>
+    <button class="tf-btn" id="rs-btn-W" onclick="setRSTimeframe('W')" {'' if has_weekly_rs else 'disabled title="Chưa đủ dữ liệu tuần"'}>Tuần</button>
+  </div>
+
+  <table id="stock-table-D">
+    {stock_table_header(BLOCK_SIZE, DATA_UNIT)}
+    {stock_rows(scores_daily)}
+  </table>
+  <table id="stock-table-W" style="display:none">
+    {stock_table_header(BLOCK_SIZE_WEEKLY, WEEKLY_UNIT) if has_weekly_rs else ""}
+    {stock_rows(scores_weekly) if has_weekly_rs else ""}
+  </table>
+
+  <div class="section-title">🏭 Xếp hạng ngành</div>
+  <div class="hint">Bấm vào tên ngành để xem biểu đồ tất cả mã trong ngành</div>
+  <table id="industry-table-D">
+    <tr><th>Ngành</th><th>Điểm thô Ngành</th><th>RS Ngành</th></tr>
+    {industry_rows(industry_df_daily)}
+  </table>
+  <table id="industry-table-W" style="display:none">
+    <tr><th>Ngành</th><th>Điểm thô Ngành</th><th>RS Ngành</th></tr>
+    {industry_rows(industry_df_weekly) if has_weekly_rs else ""}
+  </table>
   {index_section_html}
 
   <div id="chart-overlay" onclick="if(event.target===this) closeChart()">
@@ -685,6 +654,16 @@ function mountChart(parentEl, dailyData, height, titleText) {{
   return state;
 }}
 
+// ---------- Chuyển đổi Ngày/Tuần cho bảng xếp hạng RS chính ----------
+function setRSTimeframe(tf) {{
+  document.getElementById('rs-btn-D').classList.toggle('tf-active', tf === 'D');
+  document.getElementById('rs-btn-W').classList.toggle('tf-active', tf === 'W');
+  document.getElementById('stock-table-D').style.display = tf === 'D' ? '' : 'none';
+  document.getElementById('stock-table-W').style.display = tf === 'W' ? '' : 'none';
+  document.getElementById('industry-table-D').style.display = tf === 'D' ? '' : 'none';
+  document.getElementById('industry-table-W').style.display = tf === 'W' ? '' : 'none';
+}}
+
 // ---------- Popup 1 mã ----------
 function closeChart() {{
   document.getElementById('chart-overlay').style.display = 'none';
@@ -745,16 +724,6 @@ function showGroupPopup(name) {{
   }});
 }}
 
-// ---------- Chuyển đổi bảng xếp hạng RS: Khung ngày / Khung tuần ----------
-function switchRankingTimeframe(tf, btn) {{
-  const dayPanel = document.getElementById('tf-panel-day');
-  const weekPanel = document.getElementById('tf-panel-week');
-  if (dayPanel) dayPanel.style.display = (tf === 'day') ? '' : 'none';
-  if (weekPanel) weekPanel.style.display = (tf === 'week') ? '' : 'none';
-  btn.parentElement.querySelectorAll('.tf-toggle-btn').forEach(b => b.classList.remove('tf-toggle-active'));
-  btn.classList.add('tf-toggle-active');
-}}
-
 // ---------- Chỉ số dòng tiền (Money-flow Weighted Index) ----------
 function renderIndexChart(name) {{
   const entry = INDEX_DATA[name];
@@ -765,8 +734,6 @@ function renderIndexChart(name) {{
 
   container.innerHTML = '';
   if (indexChart) {{ indexChart.remove(); }}
-
-  const hasVnIndex = !!(VNINDEX_DATA && VNINDEX_DATA.length);
 
   indexChart = LightweightCharts.createChart(container, {{
     width: container.clientWidth,
@@ -779,24 +746,22 @@ function renderIndexChart(name) {{
       scaleMargins: volData.length ? {{ top: 0.1, bottom: 0.3 }} : {{ top: 0.1, bottom: 0.1 }},
     }},
     leftPriceScale: {{
-      visible: hasVnIndex,
-      borderColor: '#475569',
-      scaleMargins: {{ top: 0.1, bottom: 0.1 }},
+      visible: !!(VNINDEX_DATA && VNINDEX_DATA.length),
+      borderColor: '#f59e0b',
     }},
   }});
 
   const series = indexChart.addAreaSeries({{
     lineColor: '#60a5fa', topColor: 'rgba(96,165,250,0.3)', bottomColor: 'rgba(96,165,250,0.0)',
-    lineWidth: 2, title: name,
+    lineWidth: 2, title: name, priceScaleId: 'right',
   }});
   series.setData(data.map(d => ({{ time: d[0], value: d[1] }})));
 
-  // Đường VNIndex GIÁ TRỊ THỰC, vẽ trên trục phụ bên trái (không quy đổi mốc 1000
-  // như chỉ số tự tính) để luôn hiển thị đúng thang điểm thật của VNIndex
-  if (hasVnIndex) {{
+  // Đường VNIndex - hiển thị ĐIỂM SỐ THẬT trên trục TRÁI riêng (khác thang với chỉ số tự tính)
+  if (VNINDEX_DATA && VNINDEX_DATA.length) {{
     const vnSeries = indexChart.addLineSeries({{
-      color: '#f59e0b', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'VNIndex',
-      priceScaleId: 'left',
+      color: '#f59e0b', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed,
+      title: 'VNIndex', priceScaleId: 'left',
     }});
     vnSeries.setData(VNINDEX_DATA.map(d => ({{ time: d[0], value: d[1] }})));
   }}
