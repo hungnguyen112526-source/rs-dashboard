@@ -108,7 +108,35 @@ FRED_SERIES = {
         "description": "Chi tiêu tiêu dùng cá nhân — thước đo lạm phát Fed ưa thích",
         "transform"  : "yoy_pct",
     },
+    # --- Biến động & Tâm lý thị trường ---
+    "VIX": {
+        "id"         : "VIXCLS",
+        "label"      : "VIX (Chỉ số Sợ hãi)",
+        "group"      : "Biến động & Tâm lý thị trường",
+        "freq"       : "daily",
+        "description": "Đo mức biến động kỳ vọng của S&P 500. Khi VIX tăng mạnh, thị trường thường bước vào trạng thái phòng thủ và lo ngại rủi ro.",
+    },
+    # --- Cung tiền ---
+    "M2_US": {
+        "id"         : "M2SL",
+        "label"      : "Cung tiền M2 Mỹ (YoY %)",
+        "group"      : "Lãi suất & Tiền tệ Mỹ",
+        "freq"       : "monthly",
+        "description": "Tổng cung tiền M2 (tiền mặt, tiền gửi thanh toán, tiết kiệm...) phản ánh thanh khoản nền kinh tế Mỹ — thước đo quan trọng của chính sách tiền tệ.",
+        "transform"  : "yoy_pct",
+    },
 }
+
+# ============================================================
+# Dự báo của Fed (Summary of Economic Projections - SEP)
+# Lấy nhiều "vintage" (lần công bố) để so sánh dự báo qua các kỳ họp FOMC,
+# giống biểu đồ dạng cột nhóm nhiều màu trên trang FRED/ALFRED.
+# ============================================================
+FOMC_PROJECTION_SERIES = {
+    "FEDTARMD": {"label": "Dự báo Fed Funds Rate (Median SEP, %)", "unit": "%"},
+    "JCXFEMD":  {"label": "Dự báo Core PCE Inflation (Median SEP, %)", "unit": "%"},
+}
+N_VINTAGES = 3   # số lần công bố dự báo gần nhất muốn hiển thị (3 màu cột như ảnh mẫu)
 
 # ============================================================
 # Danh sách series World Bank cần lấy (Việt Nam)
@@ -131,6 +159,17 @@ WORLDBANK_SERIES = {
         "label"      : "FDI Việt Nam (USD)",
         "group"      : "Kinh tế Việt Nam",
         "description": "Vốn đầu tư trực tiếp nước ngoài vào Việt Nam",
+    },
+    "USDVND": {
+        "id"         : "PA.NUS.FCRF",
+        "label"      : "Tỷ giá USD/VND (bình quân năm)",
+        "group"      : "Tỷ giá & Dollar",
+        "description": (
+            "Tỷ giá quy đổi USD sang VND, tính bình quân năm (nguồn World Bank). "
+            "Lưu ý: FRED không có dữ liệu USD/VND hàng ngày đáng tin cậy vì VND không "
+            "nằm trong rổ 6 đồng tiền chính của Fed (khác với EUR/JPY/GBP...), nên chỉ "
+            "số này lấy từ World Bank và chỉ có tần suất theo năm, không phải theo ngày."
+        ),
     },
 }
 
@@ -227,6 +266,61 @@ def fetch_worldbank():
     return results
 
 
+def fetch_fomc_projections(api_key):
+    """
+    Lấy dự báo Fed Funds Rate & Core PCE (Median SEP) qua nhiều kỳ họp FOMC gần nhất,
+    dùng get_series_all_releases() để lấy đủ các lần công bố (vintage) chứ không chỉ
+    số liệu mới nhất — cho phép vẽ biểu đồ cột nhóm nhiều màu so sánh các lần dự báo.
+    """
+    try:
+        from fredapi import Fred
+    except ImportError:
+        print("LỖI: Chưa cài fredapi. Chạy: pip install fredapi")
+        return {}
+
+    fred    = Fred(api_key=api_key)
+    results = {}
+
+    for key, meta in FOMC_PROJECTION_SERIES.items():
+        try:
+            df = fred.get_series_all_releases(key)
+            if df is None or df.empty:
+                print(f"  FOMC [{key}]: Không có dữ liệu")
+                continue
+
+            df["realtime_start"] = pd.to_datetime(df["realtime_start"])
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.dropna(subset=["value"])
+
+            vintage_dates = sorted(df["realtime_start"].unique())[-N_VINTAGES:]
+
+            vintages_out = []
+            for v in vintage_dates:
+                sub = df[df["realtime_start"] == v].sort_values("date")
+                values = [
+                    [str(d.year), round(float(val), 2)]
+                    for d, val in zip(sub["date"], sub["value"])
+                ]
+                if values:
+                    vintages_out.append({
+                        "vintage": pd.Timestamp(v).strftime("%Y-%m-%d"),
+                        "values": values,
+                    })
+
+            if vintages_out:
+                results[key] = {
+                    "label": meta["label"],
+                    "unit": meta["unit"],
+                    "vintages": vintages_out,
+                }
+                print(f"  FOMC [{key}]: OK ({len(vintages_out)} vintage)")
+
+        except Exception as e:
+            print(f"  FOMC [{key}]: LỖI - {e}")
+
+    return results
+
+
 def main():
     if not FRED_API_KEY:
         print("LỖI: Không tìm thấy FRED_API_KEY trong biến môi trường.")
@@ -239,6 +333,9 @@ def main():
 
     print("\n[2] World Bank API (Việt Nam)...")
     wb_data = fetch_worldbank()
+
+    print("\n[3] Dự báo FOMC (Summary of Economic Projections)...")
+    fomc_data = fetch_fomc_projections(FRED_API_KEY)
 
     # Gộp lại
     all_data = {**fred_data, **wb_data}
@@ -259,12 +356,13 @@ def main():
         "updated_at": datetime.now(timezone.utc).astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M"),
         "groups"    : groups,
         "series"    : all_data,
+        "fomc_projections": fomc_data,
     }
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
-    print(f"\nĐã lưu {OUTPUT_FILE} ({len(all_data)} series, {len(groups)} nhóm)")
+    print(f"\nĐã lưu {OUTPUT_FILE} ({len(all_data)} series, {len(groups)} nhóm, {len(fomc_data)} chỉ số dự báo FOMC)")
 
 
 if __name__ == "__main__":
