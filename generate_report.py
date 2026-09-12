@@ -579,6 +579,26 @@ def main():
     else:
         macro_section_html = ""
 
+    # Section dự báo FOMC (Fed Funds & Core PCE, nhiều vintage) - chỉ hiện nếu có dữ liệu
+    fomc_data = macro_data.get("fomc_projections", {}) if macro_data else {}
+    if fomc_data:
+        fomc_section_html = """
+  <div class="section-title" style="margin-top:28px;">📊 Dự báo của Fed (Summary of Economic Projections)</div>
+  <div class="hint">So sánh dự báo Fed Funds Rate &amp; Core PCE qua các kỳ họp FOMC gần nhất — mỗi màu cột là 1 lần công bố dự báo (nguồn: FRED/ALFRED).</div>
+  <div class="fomc-grid">
+    <div class="fomc-card">
+      <div class="fomc-card-title">Dự báo Fed Funds Rate (Median)</div>
+      <div id="fomc-fedfunds-chart"></div>
+    </div>
+    <div class="fomc-card">
+      <div class="fomc-card-title">Dự báo Core PCE Inflation (Median)</div>
+      <div id="fomc-corepce-chart"></div>
+    </div>
+  </div>
+"""
+    else:
+        fomc_section_html = ""
+
     html = f"""<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -701,6 +721,12 @@ def main():
   .draw-btn.draw-active {{ background: #059669; border-color: #10b981; color: #fff; }}
   .draw-btn.draw-erase.draw-active {{ background: #dc2626; border-color: #ef4444; }}
   #draw-canvas {{ position:absolute; top:0; left:0; z-index:5; }}
+
+  /* Dự báo FOMC (Fed Funds & Core PCE, nhiều vintage) */
+  .fomc-grid {{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:12px; }}
+  @media (max-width: 700px) {{ .fomc-grid {{ grid-template-columns: 1fr; }} }}
+  .fomc-card {{ background:#1e293b; border-radius:8px; padding:16px; }}
+  .fomc-card-title {{ color:#94a3b8; font-size:13px; margin-bottom:10px; font-weight:600; }}
   .sticky-nav {{
     position: sticky; top:0; z-index:40; display:flex; gap:6px; flex-wrap:wrap; align-items:center;
     background:rgba(15,23,42,0.95); backdrop-filter: blur(4px);
@@ -775,6 +801,7 @@ def main():
   </div>
   <div id="section-macro">
   {macro_section_html}
+  {fomc_section_html}
   </div>
 
   <button id="back-to-top" class="back-to-top" onclick="window.scrollTo({{top:0, behavior:'smooth'}})" title="Về đầu trang">↑</button>
@@ -1647,6 +1674,108 @@ function initMacroChart() {{
   if (select.options.length) renderMacroChart(select.value);
 }}
 initMacroChart();
+
+// ---------- Biểu đồ cột nhóm: Dự báo Fed Funds Rate & Core PCE qua nhiều kỳ họp FOMC ----------
+const FOMC_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#a78bfa'];
+
+function renderFomcBarChart(containerId, proj) {{
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (!proj || !proj.vintages || !proj.vintages.length) {{
+    container.innerHTML = '<div style="padding:16px;color:#64748b;font-size:13px;">Chưa có dữ liệu dự báo.</div>';
+    return;
+  }}
+
+  const legendHtml = proj.vintages.map((v, i) =>
+    '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;font-size:11px;color:#cbd5e1;">' +
+    '<span style="width:10px;height:10px;border-radius:2px;background:' + FOMC_COLORS[i % FOMC_COLORS.length] + ';display:inline-block;"></span>' +
+    'Vintage: ' + v.vintage + '</span>'
+  ).join('');
+
+  container.innerHTML =
+    '<div style="margin-bottom:8px;">' + legendHtml + '</div>' +
+    '<canvas style="width:100%;height:260px;display:block;"></canvas>';
+
+  const canvas = container.querySelector('canvas');
+  const drawIt = () => {{
+    const dpr  = window.devicePixelRatio || 1;
+    const cssW = container.clientWidth;
+    const cssH = 260;
+    canvas.width  = cssW * dpr;
+    canvas.height = cssH * dpr;
+    canvas.style.width  = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const yearsSet = new Set();
+    proj.vintages.forEach(v => v.values.forEach(([y]) => yearsSet.add(y)));
+    const years = Array.from(yearsSet).sort();
+    if (!years.length) return;
+
+    const padding = {{ top: 14, right: 12, bottom: 26, left: 40 }};
+    const plotW = cssW - padding.left - padding.right;
+    const plotH = cssH - padding.top - padding.bottom;
+
+    let maxVal = 0;
+    proj.vintages.forEach(v => v.values.forEach(([, val]) => {{ if (val > maxVal) maxVal = val; }}));
+    maxVal = maxVal > 0 ? maxVal * 1.2 : 1;
+
+    ctx.strokeStyle = '#334155';
+    ctx.fillStyle   = '#94a3b8';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    const gridLines = 4;
+    for (let i = 0; i <= gridLines; i++) {{
+      const y = padding.top + plotH - (plotH * i / gridLines);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(padding.left + plotW, y);
+      ctx.stroke();
+      ctx.fillText((maxVal * i / gridLines).toFixed(1), 4, y + 4);
+    }}
+
+    const groupW = plotW / years.length;
+    const barW = Math.min(30, groupW / (proj.vintages.length + 1.5));
+
+    years.forEach((year, yi) => {{
+      const groupX = padding.left + yi * groupW + groupW / 2;
+      proj.vintages.forEach((v, vi) => {{
+        const entry = v.values.find(([y]) => y === year);
+        if (!entry) return;
+        const val = entry[1];
+        const barH = (val / maxVal) * plotH;
+        const x = groupX - (proj.vintages.length * barW) / 2 + vi * barW;
+        const y = padding.top + plotH - barH;
+        ctx.fillStyle = FOMC_COLORS[vi % FOMC_COLORS.length];
+        ctx.fillRect(x, y, barW - 3, barH);
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(val.toFixed(2), x + (barW - 3) / 2, y - 3);
+      }});
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(year, groupX, padding.top + plotH + 18);
+    }});
+    ctx.textAlign = 'left';
+  }};
+
+  drawIt();
+  const ro = new ResizeObserver(drawIt);
+  ro.observe(container);
+}}
+
+function initFomcCharts() {{
+  const fp = MACRO_DATA.fomc_projections;
+  if (!fp) return;
+  if (fp.FEDTARMD) renderFomcBarChart('fomc-fedfunds-chart', fp.FEDTARMD);
+  if (fp.JCXFEMD)  renderFomcBarChart('fomc-corepce-chart', fp.JCXFEMD);
+}}
+initFomcCharts();
 
 // ---------- Resize ----------
 window.addEventListener('resize', () => {{
