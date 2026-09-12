@@ -45,3 +45,4 @@ jobs:
           git add gia_lich_su_rs.csv macro_data.json docs/index.html
           git diff --cached --quiet || git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
           git push
+ 
