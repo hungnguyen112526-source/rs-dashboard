@@ -684,6 +684,23 @@ def main():
   .ind-btn:hover {{ background: #475569; color: #e2e8f0; }}
   .ind-btn.ind-active {{ background: #2563eb; border-color: #3b82f6; color: #fff; }}
   .ind-panel {{ border-top: 1px solid #334155; }}
+
+  /* Thanh công cụ vẽ kiểu TradingView (trendline, ngang/dọc, vùng, ghi chú, fibo) */
+  .draw-toolbar {{
+    display: flex; flex-wrap: wrap; gap: 6px; align-items:center;
+    padding: 8px 12px; background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }}
+  .draw-toolbar-label {{ color:#64748b; font-size:12px; margin-right:2px; }}
+  .draw-btn {{
+    background: #334155; border: 1px solid #475569; color: #94a3b8;
+    font-size: 12px; font-weight: 600; padding: 4px 10px;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+  }}
+  .draw-btn:hover {{ background: #475569; color: #e2e8f0; }}
+  .draw-btn.draw-active {{ background: #059669; border-color: #10b981; color: #fff; }}
+  .draw-btn.draw-erase.draw-active {{ background: #dc2626; border-color: #ef4444; }}
+  #draw-canvas {{ position:absolute; top:0; left:0; z-index:5; }}
   .sticky-nav {{
     position: sticky; top:0; z-index:40; display:flex; gap:6px; flex-wrap:wrap; align-items:center;
     background:rgba(15,23,42,0.95); backdrop-filter: blur(4px);
@@ -769,6 +786,17 @@ def main():
         <button id="chart-close" onclick="closeChart()">✕</button>
       </div>
       <div id="indicator-toolbar" class="indicator-toolbar" style="display:none"></div>
+      <div id="draw-toolbar" class="draw-toolbar">
+        <span class="draw-toolbar-label">✏️ Vẽ:</span>
+        <button class="draw-btn" data-draw="trend">📈 Xu hướng</button>
+        <button class="draw-btn" data-draw="hline">➖ Ngang</button>
+        <button class="draw-btn" data-draw="vline">┃ Dọc</button>
+        <button class="draw-btn" data-draw="rect">▭ Vùng</button>
+        <button class="draw-btn" data-draw="text">🔤 Ghi chú</button>
+        <button class="draw-btn" data-draw="fib">📐 Fibonacci</button>
+        <button class="draw-btn draw-erase" data-draw="erase">🗑 Xoá nét</button>
+        <button class="draw-btn" id="draw-clear-all">🧹 Xoá hết</button>
+      </div>
       <div id="chart-mount"></div>
     </div>
   </div>
@@ -852,6 +880,8 @@ function buildPriceChart(container, data, height) {{
     }},
   }});
 
+  let mainSeries = null;
+
   if (HAS_OHLC) {{
     const candleSeries = chart.addCandlestickSeries({{
       upColor: '#16a34a', downColor: '#dc2626',
@@ -859,6 +889,7 @@ function buildPriceChart(container, data, height) {{
       wickUpColor: '#16a34a', wickDownColor: '#dc2626',
     }});
     candleSeries.setData(data.map(d => ({{ time: d[0], open: d[1], high: d[2], low: d[3], close: d[4] }})));
+    mainSeries = candleSeries;
 
     if (HAS_VOLUME) {{
       const volumeSeries = chart.addHistogramSeries({{
@@ -876,14 +907,15 @@ function buildPriceChart(container, data, height) {{
   }} else {{
     const series = chart.addLineSeries({{ color: '#60a5fa', lineWidth: 2 }});
     series.setData(data.map(d => ({{ time: d[0], value: d[1] }})));
+    mainSeries = series;
   }}
 
   chart.timeScale().fitContent();
-  return chart;
+  return {{ chart, series: mainSeries }};
 }}
 
 // ---------- Gắn 1 biểu đồ + toolbar Ngày/Tuần vào 1 khu vực (dùng chung cho popup 1 mã và mini-chart) ----------
-function mountChart(parentEl, dailyData, height, titleText) {{
+function mountChart(parentEl, dailyData, height, titleText, enableDrawing) {{
   const toolbar = document.createElement('div');
   toolbar.className = 'tf-toolbar';
   toolbar.innerHTML =
@@ -900,7 +932,13 @@ function mountChart(parentEl, dailyData, height, titleText) {{
   parentEl.appendChild(chartDiv);
 
   const weeklyData = aggregateWeekly(dailyData);
-  const state = {{ chart: buildPriceChart(chartDiv, dailyData, height), container: chartDiv }};
+  const built = buildPriceChart(chartDiv, dailyData, height);
+  const state = {{ chart: built.chart, series: built.series, container: chartDiv }};
+
+  if (enableDrawing) {{
+    setupDrawingLayer(chartDiv, state.chart, state.series);
+    window.currentChart = state.chart;
+  }}
 
   toolbar.querySelectorAll('.tf-btn').forEach(btn => {{
     btn.addEventListener('click', (e) => {{
@@ -910,7 +948,15 @@ function mountChart(parentEl, dailyData, height, titleText) {{
       btn.classList.add('tf-active');
       state.chart.remove();
       const newData = btn.dataset.tf === 'W' ? weeklyData : dailyData;
-      state.chart = buildPriceChart(chartDiv, newData, height);
+      const rebuilt = buildPriceChart(chartDiv, newData, height);
+      state.chart = rebuilt.chart;
+      state.series = rebuilt.series;
+      if (enableDrawing) {{
+        setupDrawingLayer(chartDiv, state.chart, state.series);
+        window.currentChart = state.chart;
+        // Đổi khung Ngày/Tuần làm mất chart cũ -> vẽ lại chỉ báo đang bật (nếu có)
+        if (_activeIndicators.size > 0 && _drawTicker) applyIndicators(_drawTicker);
+      }}
     }});
   }});
 
@@ -922,6 +968,11 @@ function closeChart() {{
   document.getElementById('chart-overlay').style.display = 'none';
   if (currentChartState) {{ currentChartState.chart.remove(); currentChartState = null; }}
   document.getElementById('chart-mount').innerHTML = '';
+  window._draw = null;
+  _drawMode = null;
+  _drawPending = null;
+  _drawHoverPt = null;
+  document.querySelectorAll('#draw-toolbar .draw-btn').forEach(b => b.classList.remove('draw-active'));
 }}
 
 function showChart(ticker) {{
@@ -939,7 +990,15 @@ function showChart(ticker) {{
   document.querySelectorAll('.ind-panel').forEach(el => el.remove());
   if (window._overlaySeriesRefs) window._overlaySeriesRefs = [];
 
-  currentChartState = mountChart(mount, data, 360, '');
+  // Nạp nét vẽ đã lưu (localStorage) của mã này, tắt sẵn mọi công cụ vẽ
+  _drawTicker = ticker;
+  _drawings = loadDrawings(ticker);
+  _drawMode = null;
+  _drawPending = null;
+  _drawHoverPt = null;
+  document.querySelectorAll('#draw-toolbar .draw-btn').forEach(b => b.classList.remove('draw-active'));
+
+  currentChartState = mountChart(mount, data, 360, '', true);
   window.currentChart = currentChartState.chart;
 
   // Build thanh nút chỉ báo + áp dụng các chỉ báo đang active
@@ -981,7 +1040,7 @@ function showGroupPopup(name) {{
       showChart(item.ticker);
     }});
 
-    const state = mountChart(block, data, 320, item.ticker + ' — RS: ' + item.rs);
+    const state = mountChart(block, data, 320, item.ticker + ' — RS: ' + item.rs, false);
     groupChartStates.push(state);
   }});
 }}
@@ -1155,7 +1214,8 @@ function applyIndicators(ticker) {{
   window._overlaySeriesRefs = [];
 
   const LW = LightweightCharts;
-  const container = document.getElementById('chart-container');
+  const container = currentChartState ? currentChartState.container : null;
+  if (!container) return;
 
   _activeIndicators.forEach(indName => {{
     const indData = tickerData[indName];
@@ -1234,6 +1294,301 @@ function applyIndicators(ticker) {{
   }});
 }}
 
+// ---------- Công cụ vẽ kiểu TradingView (trend line, ngang/dọc, vùng, ghi chú, fibonacci) ----------
+// Nét vẽ được lưu theo từng mã trong localStorage (key: rs_draw_<ticker>), không đồng bộ máy khác.
+let _drawMode = null;      // 'trend' | 'hline' | 'vline' | 'rect' | 'text' | 'fib' | 'erase' | null
+let _drawPending = null;   // điểm {{time, price}} đầu tiên khi cần 2 điểm (trend/rect/fib)
+let _drawHoverPt = null;   // {{x, y}} vị trí chuột hiện tại, dùng để xem trước nét vẽ
+let _drawings = [];        // mảng nét vẽ của mã đang mở popup
+let _drawTicker = null;    // mã đang mở popup
+
+const DRAW_COLORS = {{
+  trend: '#3b82f6', hline: '#f59e0b', vline: '#a78bfa',
+  rect: '#10b981', text: '#e2e8f0', fib: '#facc15',
+}};
+
+function loadDrawings(ticker) {{
+  try {{
+    const raw = localStorage.getItem('rs_draw_' + ticker);
+    return raw ? JSON.parse(raw) : [];
+  }} catch (e) {{
+    return [];
+  }}
+}}
+
+function saveDrawings() {{
+  if (!_drawTicker) return;
+  try {{ localStorage.setItem('rs_draw_' + _drawTicker, JSON.stringify(_drawings)); }} catch (e) {{}}
+}}
+
+// Gắn canvas vẽ đè lên 1 chartDiv (chỉ dùng cho popup 1 mã, không dùng cho mini-chart)
+function setupDrawingLayer(container, chart, series) {{
+  const old = container.querySelector('#draw-canvas');
+  if (old) old.remove();
+
+  container.style.position = 'relative';
+  const canvas = document.createElement('canvas');
+  canvas.id = 'draw-canvas';
+  canvas.width = container.clientWidth;
+  canvas.height = container.clientHeight;
+  canvas.style.pointerEvents = _drawMode ? 'auto' : 'none';
+  container.appendChild(canvas);
+
+  window._draw = {{ canvas, ctx: canvas.getContext('2d'), chart, series, container }};
+
+  canvas.addEventListener('click', onDrawCanvasClick);
+  canvas.addEventListener('mousemove', onDrawCanvasMouseMove);
+  canvas.addEventListener('mouseleave', () => {{ _drawHoverPt = null; redrawDrawings(); }});
+  chart.timeScale().subscribeVisibleLogicalRangeChange(redrawDrawings);
+
+  redrawDrawings();
+}}
+
+function xyToPoint(x, y) {{
+  if (!window._draw) return null;
+  const {{ chart, series }} = window._draw;
+  const time = chart.timeScale().coordinateToTime(x);
+  const price = series.coordinateToPrice(y);
+  if (time === null || price === null) return null;
+  return {{ time, price }};
+}}
+
+function pointToXY(pt) {{
+  if (!window._draw || !pt) return null;
+  const {{ chart, series }} = window._draw;
+  const x = chart.timeScale().timeToCoordinate(pt.time);
+  const y = series.priceToCoordinate(pt.price);
+  if (x === null || y === null) return null;
+  return {{ x, y }};
+}}
+
+function distToSegment(px, py, x1, y1, x2, y2) {{
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t * dx, cy = y1 + t * dy;
+  return Math.hypot(px - cx, py - cy);
+}}
+
+function findDrawingNear(x, y) {{
+  const THRESH = 8;
+  for (let i = _drawings.length - 1; i >= 0; i--) {{
+    const d = _drawings[i];
+    if (d.type === 'hline') {{
+      const py = window._draw.series.priceToCoordinate(d.price);
+      if (py !== null && Math.abs(y - py) <= THRESH) return i;
+    }} else if (d.type === 'vline') {{
+      const px = window._draw.chart.timeScale().timeToCoordinate(d.time);
+      if (px !== null && Math.abs(x - px) <= THRESH) return i;
+    }} else if (d.type === 'trend' || d.type === 'fib') {{
+      const p1 = pointToXY(d.p1), p2 = pointToXY(d.p2);
+      if (p1 && p2 && distToSegment(x, y, p1.x, p1.y, p2.x, p2.y) <= THRESH) return i;
+    }} else if (d.type === 'rect') {{
+      const p1 = pointToXY(d.p1), p2 = pointToXY(d.p2);
+      if (!p1 || !p2) continue;
+      const rx = Math.min(p1.x, p2.x), ry = Math.min(p1.y, p2.y);
+      const rw = Math.abs(p2.x - p1.x), rh = Math.abs(p2.y - p1.y);
+      const nearEdge = Math.abs(x - rx) <= THRESH || Math.abs(x - (rx + rw)) <= THRESH ||
+                        Math.abs(y - ry) <= THRESH || Math.abs(y - (ry + rh)) <= THRESH;
+      const inBounds = x >= rx - THRESH && x <= rx + rw + THRESH && y >= ry - THRESH && y <= ry + rh + THRESH;
+      if (nearEdge && inBounds) return i;
+    }} else if (d.type === 'text') {{
+      const xy = pointToXY(d.p);
+      if (xy && Math.abs(x - xy.x) <= 30 && Math.abs(y - xy.y) <= 12) return i;
+    }}
+  }}
+  return -1;
+}}
+
+function finishDraw() {{
+  _drawMode = null;
+  document.querySelectorAll('#draw-toolbar .draw-btn').forEach(b => b.classList.remove('draw-active'));
+  if (window._draw) window._draw.canvas.style.pointerEvents = 'none';
+  saveDrawings();
+  redrawDrawings();
+}}
+
+function onDrawCanvasClick(e) {{
+  if (!_drawMode || !window._draw) return;
+  const rect = window._draw.canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  if (_drawMode === 'erase') {{
+    const idx = findDrawingNear(x, y);
+    if (idx >= 0) {{
+      _drawings.splice(idx, 1);
+      saveDrawings();
+      redrawDrawings();
+    }}
+    return;
+  }}
+
+  const pt = xyToPoint(x, y);
+  if (!pt) return;
+
+  if (_drawMode === 'hline') {{
+    _drawings.push({{ type: 'hline', price: pt.price, color: DRAW_COLORS.hline }});
+    finishDraw();
+    return;
+  }}
+  if (_drawMode === 'vline') {{
+    _drawings.push({{ type: 'vline', time: pt.time, color: DRAW_COLORS.vline }});
+    finishDraw();
+    return;
+  }}
+  if (_drawMode === 'text') {{
+    const txt = prompt('Nhập nội dung ghi chú:');
+    if (txt) {{
+      _drawings.push({{ type: 'text', p: pt, text: txt, color: DRAW_COLORS.text }});
+      finishDraw();
+    }}
+    return;
+  }}
+
+  // Các loại cần 2 điểm: trend line / vùng / fibonacci
+  if (!_drawPending) {{
+    _drawPending = pt;
+    redrawDrawings();
+  }} else {{
+    const type = _drawMode;
+    _drawings.push({{ type, p1: _drawPending, p2: pt, color: DRAW_COLORS[type] }});
+    _drawPending = null;
+    finishDraw();
+  }}
+}}
+
+function onDrawCanvasMouseMove(e) {{
+  if (!_drawMode || !window._draw) return;
+  if (!_drawPending) return; // chỉ cần preview khi đã có điểm đầu (trend/rect/fib)
+  const rect = window._draw.canvas.getBoundingClientRect();
+  _drawHoverPt = {{ x: e.clientX - rect.left, y: e.clientY - rect.top }};
+  redrawDrawings();
+}}
+
+function renderDrawing(ctx, d) {{
+  const {{ canvas }} = window._draw;
+
+  if (d.type === 'hline') {{
+    const y = window._draw.series.priceToCoordinate(d.price);
+    if (y === null) return;
+    ctx.strokeStyle = d.color; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = d.color; ctx.font = '11px sans-serif';
+    ctx.fillText(d.price.toFixed(2), canvas.width - 60, y - 4);
+    return;
+  }}
+  if (d.type === 'vline') {{
+    const x = window._draw.chart.timeScale().timeToCoordinate(d.time);
+    if (x === null) return;
+    ctx.strokeStyle = d.color; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    ctx.setLineDash([]);
+    return;
+  }}
+  if (d.type === 'text') {{
+    const xy = pointToXY(d.p);
+    if (!xy) return;
+    ctx.font = '12px sans-serif';
+    const padding = 4;
+    const w = ctx.measureText(d.text).width + padding * 2;
+    ctx.fillStyle = 'rgba(15,23,42,0.85)';
+    ctx.fillRect(xy.x, xy.y - 16, w, 20);
+    ctx.fillStyle = d.color;
+    ctx.fillText(d.text, xy.x + padding, xy.y - 2);
+    return;
+  }}
+  if (d.type === 'trend') {{
+    const p1 = pointToXY(d.p1), p2 = pointToXY(d.p2);
+    if (!p1 || !p2) return;
+    ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    return;
+  }}
+  if (d.type === 'rect') {{
+    const p1 = pointToXY(d.p1), p2 = pointToXY(d.p2);
+    if (!p1 || !p2) return;
+    const x = Math.min(p1.x, p2.x), y = Math.min(p1.y, p2.y);
+    const w = Math.abs(p2.x - p1.x), h = Math.abs(p2.y - p1.y);
+    ctx.fillStyle = d.color + '33';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = d.color; ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.strokeRect(x, y, w, h);
+    return;
+  }}
+  if (d.type === 'fib') {{
+    const p1 = pointToXY(d.p1), p2 = pointToXY(d.p2);
+    if (!p1 || !p2) return;
+    const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+    const xLeft = Math.min(p1.x, p2.x);
+    ctx.font = '10px sans-serif';
+    levels.forEach(lv => {{
+      const price = d.p1.price + (d.p2.price - d.p1.price) * lv;
+      const y = window._draw.series.priceToCoordinate(price);
+      if (y === null) return;
+      ctx.strokeStyle = d.color; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(xLeft, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = d.color;
+      ctx.fillText(lv.toFixed(3) + ' (' + price.toFixed(2) + ')', xLeft + 4, y - 3);
+    }});
+    return;
+  }}
+}}
+
+function renderPreview(ctx, mode, p1xy, p2xy) {{
+  ctx.setLineDash([4, 3]);
+  ctx.globalAlpha = 0.7;
+  if (mode === 'trend' || mode === 'fib') {{
+    ctx.strokeStyle = DRAW_COLORS[mode]; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(p1xy.x, p1xy.y); ctx.lineTo(p2xy.x, p2xy.y); ctx.stroke();
+  }} else if (mode === 'rect') {{
+    const x = Math.min(p1xy.x, p2xy.x), y = Math.min(p1xy.y, p2xy.y);
+    const w = Math.abs(p2xy.x - p1xy.x), h = Math.abs(p2xy.y - p1xy.y);
+    ctx.strokeStyle = DRAW_COLORS.rect; ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+  }}
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+}}
+
+function redrawDrawings() {{
+  if (!window._draw) return;
+  const {{ ctx, canvas }} = window._draw;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  _drawings.forEach(d => renderDrawing(ctx, d));
+  if (_drawPending && _drawHoverPt) {{
+    const p1xy = pointToXY(_drawPending);
+    if (p1xy) renderPreview(ctx, _drawMode, p1xy, _drawHoverPt);
+  }}
+}}
+
+// Gắn sự kiện cho thanh nút vẽ (chạy 1 lần lúc tải trang, các nút này cố định trong HTML)
+document.querySelectorAll('#draw-toolbar .draw-btn[data-draw]').forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    const mode = btn.dataset.draw;
+    _drawMode = (_drawMode === mode) ? null : mode;
+    _drawPending = null;
+    document.querySelectorAll('#draw-toolbar .draw-btn').forEach(b => {{
+      b.classList.toggle('draw-active', b.dataset.draw === _drawMode);
+    }});
+    if (window._draw) window._draw.canvas.style.pointerEvents = _drawMode ? 'auto' : 'none';
+    redrawDrawings();
+  }});
+}});
+const _drawClearAllBtn = document.getElementById('draw-clear-all');
+if (_drawClearAllBtn) {{
+  _drawClearAllBtn.addEventListener('click', () => {{
+    if (!_drawTicker) return;
+    if (!confirm('Xoá toàn bộ nét vẽ của mã ' + _drawTicker + '?')) return;
+    _drawings = [];
+    saveDrawings();
+    redrawDrawings();
+  }});
+}}
+
 // ---------- Biểu đồ vĩ mô (FRED + World Bank) ----------
 let macroChart = null;
 
@@ -1297,6 +1652,11 @@ initMacroChart();
 window.addEventListener('resize', () => {{
   if (currentChartState) {{
     currentChartState.chart.applyOptions({{ width: currentChartState.container.clientWidth }});
+    if (window._draw) {{
+      window._draw.canvas.width = currentChartState.container.clientWidth;
+      window._draw.canvas.height = currentChartState.container.clientHeight;
+      redrawDrawings();
+    }}
   }}
   groupChartStates.forEach(s => {{
     s.chart.applyOptions({{ width: s.container.clientWidth }});
