@@ -15,12 +15,14 @@ nên khi người xem tương tác, biểu đồ vẽ ngay trên trình duyệt 
 
 import os
 import json
+import importlib.util
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone, timedelta
 
 INPUT_FILE = "gia_lich_su_rs.csv"
 OUTPUT_FILE = "docs/index.html"
+INDICATORS_DIR = "indicators"  # thư mục chứa các file chỉ báo
 
 # Đổi 2 giá trị này đúng theo tài khoản/repo của bạn để nút "Cập nhật ngay" trỏ đúng chỗ
 GITHUB_OWNER = "hungnguyen112526-source"
@@ -37,6 +39,70 @@ DATA_UNIT = "phiên"
 WEEKLY_BLOCK_SIZE = 20  # dữ liệu theo TUẦN (gộp từ dữ liệu ngày có sẵn) -> 20 tuần/khối
 WEEKLY_UNIT = "tuần"
 WEEKLY_MIN_SESSIONS = WEEKLY_BLOCK_SIZE * 4  # 80 tuần (~1.5 năm)
+
+
+def load_indicators():
+    """
+    Đọc toàn bộ file chỉ báo trong thư mục INDICATORS_DIR.
+    - File .py  : import module, lấy NAME/PANEL/compute
+    - File .js  : đọc raw text để nhúng vào HTML
+    Bỏ qua file bắt đầu bằng _ hoặc không đúng format.
+    Trả về (py_indicators, js_indicators)
+    """
+    py_indicators = []
+    js_raw = []
+
+    if not os.path.isdir(INDICATORS_DIR):
+        return py_indicators, js_raw
+
+    for fname in sorted(os.listdir(INDICATORS_DIR)):
+        fpath = os.path.join(INDICATORS_DIR, fname)
+        if fname.startswith("_"):
+            continue
+
+        if fname.endswith(".py"):
+            try:
+                spec = importlib.util.spec_from_file_location(fname[:-3], fpath)
+                mod  = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                if not all(hasattr(mod, attr) for attr in ("NAME", "PANEL", "compute")):
+                    print(f"  [indicators] Bỏ qua {fname}: thiếu NAME/PANEL/compute")
+                    continue
+                py_indicators.append({"name": mod.NAME, "panel": mod.PANEL, "module": mod, "file": fname})
+                print(f"  [indicators] Đã load {fname} ({mod.NAME}, panel={mod.PANEL})")
+            except Exception as e:
+                print(f"  [indicators] Lỗi load {fname}: {e}")
+
+        elif fname.endswith(".js") and not fname.startswith("custom_example"):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    js_raw.append({"file": fname, "code": f.read()})
+                print(f"  [indicators] Đã load JS {fname}")
+            except Exception as e:
+                print(f"  [indicators] Lỗi load JS {fname}: {e}")
+
+    return py_indicators, js_raw
+
+
+def compute_indicators_for_ticker(ticker_df, py_indicators):
+    """
+    Chạy compute() của từng Python indicator trên dữ liệu 1 mã.
+    Trả về dict: { indicator_name: { panel, series: [...] } }
+    """
+    results = {}
+    df = ticker_df.sort_values("date").reset_index(drop=True)
+
+    for ind in py_indicators:
+        try:
+            series_list = ind["module"].compute(df)
+            results[ind["name"]] = {
+                "panel" : ind["panel"],
+                "series": series_list,
+            }
+        except Exception as e:
+            print(f"  [indicators] Lỗi compute {ind['file']} cho {df['ticker'].iloc[0] if len(df) else '?'}: {e}")
+
+    return results
 
 
 def block_period_label(block_index, block_size=BLOCK_SIZE, unit=DATA_UNIT):
@@ -447,6 +513,22 @@ def main():
         index_section_html = ""
 
     updated_at = datetime.now(timezone.utc).astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M")
+
+    # --- Load chỉ báo kỹ thuật từ thư mục indicators/ ---
+    print("\nĐang load chỉ báo kỹ thuật...")
+    py_indicators, js_indicators = load_indicators()
+    print(f"Đã load {len(py_indicators)} Python indicator(s), {len(js_indicators)} JS indicator(s)")
+
+    # Tính toán chỉ báo cho từng mã (chỉ dùng dữ liệu ngày)
+    indicator_data = {}
+    if py_indicators:
+        for ticker in df["ticker"].unique():
+            ticker_df = df[df["ticker"] == ticker][["date","open","high","low","close","volume"]].copy()
+            indicator_data[ticker] = compute_indicators_for_ticker(ticker_df, py_indicators)
+
+    indicator_data_json = json.dumps(indicator_data, ensure_ascii=False)
+    py_indicator_names  = json.dumps([i["name"] for i in py_indicators], ensure_ascii=False)
+    js_indicators_code  = "\n\n".join(f"// --- {j['file']} ---\n{j['code']}" for j in js_indicators)
     chart_data_json = json.dumps(chart_data, ensure_ascii=False)
     group_data_json = json.dumps(group_data, ensure_ascii=False)
     index_data_json = json.dumps(index_data, ensure_ascii=False)
@@ -456,6 +538,46 @@ def main():
     has_volume_json = "true" if has_volume else "false"
 
     index_nav_item = '<a class="sticky-nav-item" href="#section-index">📊 Dòng tiền</a>' if index_data else ""
+
+    # --- Đọc dữ liệu vĩ mô từ macro_data.json (nếu có) ---
+    macro_data = {}
+    MACRO_FILE = "macro_data.json"
+    if os.path.exists(MACRO_FILE):
+        try:
+            with open(MACRO_FILE, encoding="utf-8") as f:
+                macro_data = json.load(f)
+            print(f"Đã đọc {MACRO_FILE} ({len(macro_data.get('series', {}))} series)")
+        except Exception as e:
+            print(f"CẢNH BÁO: Không đọc được {MACRO_FILE}: {e}")
+
+    macro_data_json = json.dumps(macro_data, ensure_ascii=False)
+    macro_nav_item  = '<a class="sticky-nav-item" href="#section-macro">🌐 Vĩ mô</a>' if macro_data else ""
+
+    # Build dropdown và section vĩ mô
+    if macro_data and macro_data.get("series"):
+        groups  = macro_data.get("groups", {})
+        series  = macro_data.get("series", {})
+        updated = macro_data.get("updated_at", "")
+
+        # Tạo options theo optgroup
+        opts_html = ""
+        for group_name, keys in groups.items():
+            opts_html += f'<optgroup label="{group_name}">'
+            for key in keys:
+                label = series[key]["label"] if key in series else key
+                opts_html += f'<option value="{key}">{label}</option>'
+            opts_html += '</optgroup>'
+
+        macro_section_html = f"""
+  <div class="section-title">🌐 Dữ liệu vĩ mô</div>
+  <div class="hint">Nguồn: FRED (Federal Reserve Bank of St. Louis) · World Bank · Cập nhật lần cuối: {updated}</div>
+  <div class="hint"><span style="color:#60a5fa">—</span> Chọn chỉ số từ dropdown để xem biểu đồ</div>
+  <select id="macro-select" class="index-select">{opts_html}</select>
+  <div id="macro-chart-container" style="width:100%;height:360px;background:#1e293b;border-radius:8px;margin-top:8px;"></div>
+  <div id="macro-description" class="hint" style="margin-top:8px;color:#94a3b8;font-style:italic;"></div>
+"""
+    else:
+        macro_section_html = ""
 
     html = f"""<!DOCTYPE html>
 <html lang="vi">
@@ -548,7 +670,20 @@ def main():
   .tf-btn:hover {{ background:#475569; }}
   .tf-btn.tf-active {{ background:#2563eb; color:#fff; }}
 
-  /* Menu điều hướng dính trên đầu trang */
+  /* Thanh chỉ báo kỹ thuật ngay trên biểu đồ */
+  .indicator-toolbar {{
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 8px 12px; background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }}
+  .ind-btn {{
+    background: #334155; border: 1px solid #475569; color: #94a3b8;
+    font-size: 12px; font-weight: 600; padding: 4px 10px;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+  }}
+  .ind-btn:hover {{ background: #475569; color: #e2e8f0; }}
+  .ind-btn.ind-active {{ background: #2563eb; border-color: #3b82f6; color: #fff; }}
+  .ind-panel {{ border-top: 1px solid #334155; }}
   .sticky-nav {{
     position: sticky; top:0; z-index:40; display:flex; gap:6px; flex-wrap:wrap; align-items:center;
     background:rgba(15,23,42,0.95); backdrop-filter: blur(4px);
@@ -602,6 +737,7 @@ def main():
     <a class="sticky-nav-item" href="#top">⬆ Đầu trang</a>
     <a class="sticky-nav-item" href="#section-ranking">🏆 Xếp hạng</a>
     {index_nav_item}
+    {macro_nav_item}
   </nav>
   <div class="header-row">
     <h1>📈 Bảng xếp hạng RS chứng khoán</h1>
@@ -620,6 +756,9 @@ def main():
   <div id="section-index">
   {index_section_html}
   </div>
+  <div id="section-macro">
+  {macro_section_html}
+  </div>
 
   <button id="back-to-top" class="back-to-top" onclick="window.scrollTo({{top:0, behavior:'smooth'}})" title="Về đầu trang">↑</button>
 
@@ -629,6 +768,7 @@ def main():
         <div id="chart-title">Biểu đồ giá</div>
         <button id="chart-close" onclick="closeChart()">✕</button>
       </div>
+      <div id="indicator-toolbar" class="indicator-toolbar" style="display:none"></div>
       <div id="chart-mount"></div>
     </div>
   </div>
@@ -649,6 +789,9 @@ const GROUP_DATA = {group_data_json};
 const INDEX_DATA = {index_data_json};
 const INDEX_CATEGORIES = {index_categories_json};
 const VNINDEX_DATA = {vnindex_json};
+const INDICATOR_DATA = {indicator_data_json};
+const PY_INDICATOR_NAMES = {py_indicator_names};
+const MACRO_DATA = {macro_data_json};
 const HAS_OHLC = {has_ohlc_json};
 const HAS_VOLUME = {has_volume_json};
 
@@ -792,7 +935,16 @@ function showChart(ticker) {{
   mount.innerHTML = '';
   if (currentChartState) {{ currentChartState.chart.remove(); }}
 
+  // Xóa panel indicator cũ khi mở mã mới
+  document.querySelectorAll('.ind-panel').forEach(el => el.remove());
+  if (window._overlaySeriesRefs) window._overlaySeriesRefs = [];
+
   currentChartState = mountChart(mount, data, 360, '');
+  window.currentChart = currentChartState.chart;
+
+  // Build thanh nút chỉ báo + áp dụng các chỉ báo đang active
+  buildIndicatorToolbar(ticker);
+  if (_activeIndicators.size > 0) applyIndicators(ticker);
 }}
 
 // ---------- Popup Ngành / Nhóm (danh sách nhiều mini-chart) ----------
@@ -833,6 +985,9 @@ function showGroupPopup(name) {{
     groupChartStates.push(state);
   }});
 }}
+
+// ---------- JS Indicators (từ thư mục indicators/*.js) ----------
+{js_indicators_code}
 
 // ---------- Chuyển đổi bảng xếp hạng RS: Khung ngày / Khung tuần ----------
 function switchRankingTimeframe(tf, btn) {{
@@ -962,6 +1117,181 @@ window.addEventListener('scroll', () => {{
   const btn = document.getElementById('back-to-top');
   if (btn) btn.style.display = (window.scrollY > 400) ? 'flex' : 'none';
 }});
+
+// ---------- Chỉ báo kỹ thuật: toolbar + render ----------
+const _activeIndicators = new Set();
+
+function buildIndicatorToolbar(ticker) {{
+  const toolbar = document.getElementById('indicator-toolbar');
+  if (!toolbar) return;
+  toolbar.innerHTML = '';
+  if (!PY_INDICATOR_NAMES.length) {{ toolbar.style.display = 'none'; return; }}
+  toolbar.style.display = 'flex';
+  PY_INDICATOR_NAMES.forEach(name => {{
+    const btn = document.createElement('button');
+    btn.className = 'ind-btn' + (_activeIndicators.has(name) ? ' ind-active' : '');
+    btn.textContent = name;
+    btn.onclick = () => {{
+      if (_activeIndicators.has(name)) _activeIndicators.delete(name);
+      else _activeIndicators.add(name);
+      btn.classList.toggle('ind-active');
+      applyIndicators(ticker);
+    }};
+    toolbar.appendChild(btn);
+  }});
+}}
+
+function applyIndicators(ticker) {{
+  // Xóa tất cả panel indicator cũ
+  document.querySelectorAll('.ind-panel').forEach(el => el.remove());
+
+  const tickerData = INDICATOR_DATA[ticker];
+  if (!tickerData || !currentChart) return;
+
+  // Overlay: thêm series vào chart nến hiện tại
+  if (_overlaySeriesRefs) {{
+    _overlaySeriesRefs.forEach(s => {{ try {{ currentChart.removeSeries(s); }} catch(e) {{}} }});
+  }}
+  window._overlaySeriesRefs = [];
+
+  const LW = LightweightCharts;
+  const container = document.getElementById('chart-container');
+
+  _activeIndicators.forEach(indName => {{
+    const indData = tickerData[indName];
+    if (!indData) return;
+
+    if (indData.panel === 'overlay') {{
+      // Vẽ chồng lên biểu đồ nến chính
+      indData.series.forEach(s => {{
+        const ls = currentChart.addLineSeries({{
+          color: s.color, lineWidth: s.width || 1, title: s.label,
+          lineStyle: s.dashed ? LW.LineStyle.Dashed : LW.LineStyle.Solid,
+          priceLineVisible: false, lastValueVisible: true,
+        }});
+        ls.setData(s.values.filter(v => v[1] !== null).map(v => ({{time: v[0], value: v[1]}})));
+        window._overlaySeriesRefs.push(ls);
+      }});
+
+    }} else if (indData.panel === 'volume') {{
+      // Vẽ MA trên panel volume — dùng chung trục với volume series
+      indData.series.forEach(s => {{
+        const ls = currentChart.addLineSeries({{
+          color: s.color, lineWidth: s.width || 2, title: s.label,
+          priceScaleId: 'volume', priceLineVisible: false, lastValueVisible: true,
+        }});
+        ls.setData(s.values.filter(v => v[1] !== null).map(v => ({{time: v[0], value: v[1]}})));
+        window._overlaySeriesRefs.push(ls);
+      }});
+
+    }} else {{
+      // Separate panel: tạo chart mới bên dưới
+      const panelDiv = document.createElement('div');
+      panelDiv.className = 'ind-panel';
+      panelDiv.style.cssText = 'height:120px;width:100%;';
+      container.parentNode.insertBefore(panelDiv, container.nextSibling);
+
+      const panelChart = LW.createChart(panelDiv, {{
+        width: panelDiv.clientWidth, height: 120,
+        layout: {{ background: {{color:'#1e293b'}}, textColor:'#cbd5e1' }},
+        grid: {{ vertLines: {{color:'#334155'}}, horzLines: {{color:'#334155'}} }},
+        timeScale: {{ borderColor:'#475569', visible: true }},
+        rightPriceScale: {{ borderColor:'#475569', scaleMargins: {{top:0.05, bottom:0.05}} }},
+        crosshair: {{ mode: LW.CrosshairMode.Normal }},
+      }});
+
+      // Đồng bộ timeScale với chart chính
+      panelChart.timeScale().subscribeVisibleLogicalRangeChange(range => {{
+        if (range && currentChart) currentChart.timeScale().setVisibleLogicalRange(range);
+      }});
+
+      indData.series.forEach(s => {{
+        let series;
+        if (s.type === 'histogram') {{
+          series = panelChart.addHistogramSeries({{
+            color: s.color, priceLineVisible: false, lastValueVisible: false,
+            priceFormat: {{type:'price', precision:4, minMove:0.0001}},
+          }});
+          series.setData(s.values.filter(v => v[1] !== null)
+            .map(v => ({{time: v[0], value: v[1], color: v[2] || s.color}})));
+        }} else {{
+          series = panelChart.addLineSeries({{
+            color: s.color, lineWidth: s.width || 1, title: s.label,
+            lineStyle: s.dashed ? LW.LineStyle.Dashed : LW.LineStyle.Solid,
+            priceLineVisible: false, lastValueVisible: true,
+            priceFormat: {{type:'price', precision:2, minMove:0.01}},
+          }});
+          series.setData(s.values.filter(v => v[1] !== null).map(v => ({{time: v[0], value: v[1]}})));
+        }}
+        // RSI: thêm ngưỡng overbought/oversold bằng price line
+        if (s.y_min !== undefined) panelChart.priceScale('right').applyOptions({{
+          autoScale: false, minimum: s.y_min, maximum: s.y_max,
+        }});
+      }});
+
+      panelChart.timeScale().fitContent();
+    }}
+  }});
+}}
+
+// ---------- Biểu đồ vĩ mô (FRED + World Bank) ----------
+let macroChart = null;
+
+function renderMacroChart(key) {{
+  const entry = MACRO_DATA.series && MACRO_DATA.series[key];
+  if (!entry) return;
+
+  const container = document.getElementById('macro-chart-container');
+  const descEl    = document.getElementById('macro-description');
+  if (!container) return;
+
+  if (macroChart) {{ macroChart.remove(); macroChart = null; }}
+
+  // Hiện mô tả
+  if (descEl) descEl.textContent = entry.description || '';
+
+  const isMonthly = entry.freq === 'monthly';
+  const isYearly  = entry.freq === 'yearly';
+
+  macroChart = LightweightCharts.createChart(container, {{
+    width : container.clientWidth,
+    height: 360,
+    layout: {{ background: {{ color: '#1e293b' }}, textColor: '#cbd5e1' }},
+    grid  : {{ vertLines: {{ color: '#334155' }}, horzLines: {{ color: '#334155' }} }},
+    timeScale: {{ borderColor: '#475569', timeVisible: !isYearly }},
+    rightPriceScale: {{ borderColor: '#475569' }},
+  }});
+
+  const values = (entry.values || [])
+    .filter(v => v[1] !== null && v[1] !== undefined)
+    .map(v => ({{ time: v[0], value: v[1] }}));
+
+  if (!values.length) return;
+
+  const series = macroChart.addAreaSeries({{
+    lineColor   : '#60a5fa',
+    topColor    : 'rgba(96,165,250,0.25)',
+    bottomColor : 'rgba(96,165,250,0.0)',
+    lineWidth   : 2,
+    title       : entry.label,
+  }});
+  series.setData(values);
+  macroChart.timeScale().fitContent();
+
+  // Resize
+  const ro = new ResizeObserver(() => {{
+    if (macroChart) macroChart.applyOptions({{ width: container.clientWidth }});
+  }});
+  ro.observe(container);
+}}
+
+function initMacroChart() {{
+  const select = document.getElementById('macro-select');
+  if (!select || !MACRO_DATA.series) return;
+  select.addEventListener('change', () => renderMacroChart(select.value));
+  if (select.options.length) renderMacroChart(select.value);
+}}
+initMacroChart();
 
 // ---------- Resize ----------
 window.addEventListener('resize', () => {{
