@@ -34,9 +34,19 @@ VN_TZ           = timezone(timedelta(hours=7))
 # Lần chạy đầu tiên (chưa có lịch sử) sẽ backfill BOOTSTRAP_DAYS ngày gần nhất.
 # Các lần chạy sau chỉ tải bù đúng số ngày còn thiếu (thường chỉ 1 ngày/lần chạy
 # hàng ngày), MAX_BACKFILL_DAYS chỉ là chặn trên đề phòng script bị gián đoạn lâu ngày.
-BOOTSTRAP_DAYS    = 60
-MAX_BACKFILL_DAYS = 90
-MAX_HISTORY_POINTS = 500  # giới hạn số điểm lưu lại cho mỗi series vnstock, tránh phình file mãi
+# Lưu ý: gói vnstock Community giới hạn 60 requests/phút, nên BOOTSTRAP_DAYS không nên
+# quá lớn (2 series x N ngày = 2N requests cho lần chạy đầu) — 20 ngày là đủ cho biểu đồ
+# ban đầu có hình dạng, các lần chạy sau sẽ tự nối dài thêm mỗi ngày.
+BOOTSTRAP_DAYS      = 20
+MAX_BACKFILL_DAYS   = 90
+MAX_HISTORY_POINTS  = 500  # giới hạn số điểm lưu lại cho mỗi series vnstock, tránh phình file mãi
+
+# Nghỉ giữa mỗi lần gọi API vnstock (giây). Giới hạn Community là 60 requests/phút và
+# mỗi lệnh gọi thực tế tốn nhiều hơn 1 "request" (có thêm ping đo lường nội bộ của vnstock),
+# nên cần nghỉ khá rộng rãi để không bị chặn — 3s/lần tương đương tối đa ~20 lần/phút.
+RETAIL_REQUEST_DELAY       = 3
+RETAIL_COOLDOWN_AFTER_ERRORS = 3    # số lỗi (exception) liên tiếp trước khi tạm nghỉ dài
+RETAIL_COOLDOWN_SECONDS      = 65   # nghỉ hơn 1 phút để chờ cửa sổ rate-limit reset
 
 # ============================================================
 # Danh sách series FRED cần lấy
@@ -199,9 +209,8 @@ def fetch_fred(api_key):
 
     fred    = Fred(api_key=api_key)
     results = {}
-    total   = len(FRED_SERIES)
 
-    for i, (key, meta) in enumerate(FRED_SERIES.items()):
+    for key, meta in FRED_SERIES.items():
         try:
             series = fred.get_series(meta["id"], observation_start=START_DATE)
             series = series.dropna()
@@ -223,15 +232,10 @@ def fetch_fred(api_key):
                 "freq"       : meta.get("freq", "daily"),
                 "values"     : values,
             }
-            print(f"  FRED [{i+1}/{total}] {key}: OK ({len(values)} điểm)")
+            print(f"  FRED [{key}]: OK ({len(values)} điểm)")
 
         except Exception as e:
-            print(f"  FRED [{i+1}/{total}] {key}: LỖI - {e}")
-
-        # Nghỉ 6 giây giữa các request để tránh rate limit (60 req/phút = 1 req/giây)
-        # Dùng 6 giây để an toàn (chỉ ~10 req/phút thay vì giới hạn 60)
-        if i < total - 1:
-            time.sleep(6)
+            print(f"  FRED [{key}]: LỖI - {e}")
 
     return results
 
@@ -244,18 +248,18 @@ def fetch_worldbank():
         print("LỖI: Chưa cài wbgapi. Chạy: pip install wbgapi")
         return {}
 
-    results    = {}
+    results = {}
     start_year = int(START_DATE[:4])
-    total      = len(WORLDBANK_SERIES)
 
-    for i, (key, meta) in enumerate(WORLDBANK_SERIES.items()):
+    for key, meta in WORLDBANK_SERIES.items():
         try:
             df = wb.data.DataFrame(meta["id"], "VNM", mrv=30)
             if df.empty:
-                print(f"  WorldBank [{i+1}/{total}] {key}: Không có dữ liệu")
+                print(f"  WorldBank [{key}]: Không có dữ liệu")
                 continue
 
-            row    = df.iloc[0]
+            # df có index là mã chỉ tiêu, cột là năm dạng "YR2020"
+            row = df.iloc[0]
             values = []
             for col, val in row.items():
                 year_str = str(col).replace("YR", "")
@@ -277,14 +281,10 @@ def fetch_worldbank():
                 "freq"       : "yearly",
                 "values"     : values,
             }
-            print(f"  WorldBank [{i+1}/{total}] {key}: OK ({len(values)} điểm)")
+            print(f"  WorldBank [{key}]: OK ({len(values)} điểm)")
 
         except Exception as e:
-            print(f"  WorldBank [{i+1}/{total}] {key}: LỖI - {e}")
-
-        # Nghỉ 5 giây giữa các request World Bank
-        if i < total - 1:
-            time.sleep(5)
+            print(f"  WorldBank [{key}]: LỖI - {e}")
 
     return results
 
@@ -328,10 +328,42 @@ def _missing_dates(existing_values, bootstrap_days=BOOTSTRAP_DAYS, max_backfill_
     return [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n_days)]
 
 
+def _fetch_usdvnd_point(retail, date_str):
+    """Gọi API lấy tỷ giá bán USD/VND tại 1 ngày cụ thể. Trả về float hoặc None
+    (None = không có dữ liệu ngày đó, ví dụ cuối tuần/lễ — không phải lỗi)."""
+    df = retail.exchange_rate(date=date_str)
+    if df is None or df.empty:
+        return None
+    row = df[df["currency_code"].astype(str).str.upper() == "USD"]
+    if row.empty:
+        return None
+    sell = row.iloc[0]["sell"]
+    return round(float(sell), 2) if pd.notna(sell) else None
+
+
+def _fetch_gold_point(retail, date_str):
+    """Gọi API lấy giá bán vàng SJC 1 lượng tại 1 ngày cụ thể. Trả về float hoặc None."""
+    df = retail.gold(source="sjc", date=date_str)
+    if df is None or df.empty:
+        return None
+    # Ưu tiên dòng "SJC 1L" (vàng miếng 1 lượng, chuẩn tham chiếu phổ biến nhất);
+    # nếu không tìm thấy tên khớp thì lấy dòng đầu tiên trả về.
+    mask = df["name"].astype(str).str.contains("1L", case=False, na=False)
+    row = df[mask].iloc[0] if mask.any() else df.iloc[0]
+    sell = row["sell_price"]
+    return round(float(sell), 2) if pd.notna(sell) else None
+
+
 def fetch_vnstock_retail(existing_series):
     """Lấy tỷ giá USD/VND (Vietcombank) và giá vàng SJC qua vnstock (dùng chung
     VNSTOCK_API_KEY, không cần license riêng). 2 hàm này chỉ trả về giá trị tại
     1 ngày cụ thể -> lịch sử được tích luỹ dần qua từng lần chạy (xem _missing_dates).
+
+    Cả 2 series được lấy trong CÙNG 1 vòng lặp theo ngày (thay vì 2 vòng lặp riêng)
+    để kiểm soát tổng số request/phút một cách nhất quán, tránh vượt hạn mức 60
+    requests/phút của gói Community. Có cơ chế tự tạm nghỉ dài (cooldown) khi nghi
+    ngờ bị chặn do gọi dồn dập, giống cách fetch_data.py xử lý với giá cổ phiếu.
+
     Trả về dict {key: {meta, values}}, đã gộp với lịch sử cũ."""
     try:
         from vnstock import Retail
@@ -348,71 +380,64 @@ def fetch_vnstock_retail(existing_series):
                   f"tỷ giá/vàng không bắt buộc cần key.")
 
     retail = Retail()
+
+    old_usdvnd = existing_series.get("USDVND", {}).get("values", [])
+    old_gold   = existing_series.get("GOLD_SJC", {}).get("values", [])
+    dates = sorted(set(_missing_dates(old_usdvnd)) | set(_missing_dates(old_gold)))
+
+    new_usdvnd = {}
+    new_gold   = {}
+    err_usdvnd = 0
+    err_gold   = 0
+
+    def _cooldown_if_needed():
+        nonlocal err_usdvnd, err_gold
+        if err_usdvnd >= RETAIL_COOLDOWN_AFTER_ERRORS or err_gold >= RETAIL_COOLDOWN_AFTER_ERRORS:
+            print(f"  >> Nghi ngờ bị giới hạn API (rate limit), tạm nghỉ {RETAIL_COOLDOWN_SECONDS}s...")
+            time.sleep(RETAIL_COOLDOWN_SECONDS)
+            err_usdvnd = 0
+            err_gold = 0
+
+    for d in dates:
+        try:
+            v = _fetch_usdvnd_point(retail, d)
+            if v is not None:
+                new_usdvnd[d] = v
+            err_usdvnd = 0
+        except Exception as e:
+            print(f"  vnstock [USDVND] {d}: bỏ qua ({type(e).__name__})")
+            err_usdvnd += 1
+        time.sleep(RETAIL_REQUEST_DELAY)
+        _cooldown_if_needed()
+
+        try:
+            v = _fetch_gold_point(retail, d)
+            if v is not None:
+                new_gold[d] = v
+            err_gold = 0
+        except Exception as e:
+            print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({type(e).__name__})")
+            err_gold += 1
+        time.sleep(RETAIL_REQUEST_DELAY)
+        _cooldown_if_needed()
+
     results = {}
 
-    # --- Tỷ giá USD/VND (Vietcombank) ---
-    old_values = existing_series.get("USDVND", {}).get("values", [])
-    dates_to_fetch = _missing_dates(old_values)
-    new_points = []
-    for i, d in enumerate(dates_to_fetch):
-        try:
-            df = retail.exchange_rate(date=d)
-            if df is None or df.empty:
-                continue
-            row = df[df["currency_code"].astype(str).str.upper() == "USD"]
-            if row.empty:
-                continue
-            sell = row.iloc[0]["sell"]
-            if pd.notna(sell):
-                new_points.append([d, round(float(sell), 2)])
-        except Exception as e:
-            err = type(e).__name__
-            print(f"  vnstock [USDVND] {d}: bỏ qua ({err})")
-            # Nếu lỗi có vẻ là rate limit → nghỉ lâu hơn rồi tiếp tục
-            if "rate" in str(e).lower() or "limit" in str(e).lower() or "429" in str(e):
-                print("  >> Rate limit USDVND, nghỉ 70 giây...")
-                time.sleep(70)
-        # Nghỉ 2 giây giữa mỗi ngày (30 req/phút, an toàn với limit 60 req/phút)
-        time.sleep(2)
-
-    merged = {v[0]: v[1] for v in old_values}
-    merged.update({p[0]: p[1] for p in new_points})
-    values = sorted(merged.items())[-MAX_HISTORY_POINTS:]
-    values = [[d, v] for d, v in values]
+    merged_usdvnd = {v[0]: v[1] for v in old_usdvnd}
+    merged_usdvnd.update(new_usdvnd)
+    values_usdvnd = sorted(merged_usdvnd.items())[-MAX_HISTORY_POINTS:]
+    values_usdvnd = [[d, v] for d, v in values_usdvnd]
     results["USDVND"] = {
         "label"      : "Tỷ giá USD/VND (Vietcombank, bán ra)",
         "group"      : "Tỷ giá & Vàng (Việt Nam)",
         "description": "Tỷ giá bán USD/VND niêm yết tại Vietcombank (qua vnstock)",
         "freq"       : "daily",
-        "values"     : values,
+        "values"     : values_usdvnd,
     }
-    print(f"  vnstock [USDVND]: OK ({len(new_points)} điểm mới, {len(values)} điểm tổng)")
+    print(f"  vnstock [USDVND]: OK ({len(new_usdvnd)} điểm mới, {len(values_usdvnd)} điểm tổng)")
 
-    # --- Giá vàng SJC ---
-    old_values_gold = existing_series.get("GOLD_SJC", {}).get("values", [])
-    dates_to_fetch_gold = _missing_dates(old_values_gold)
-    new_points_gold = []
-    for i, d in enumerate(dates_to_fetch_gold):
-        try:
-            df = retail.gold(source="sjc", date=d)
-            if df is None or df.empty:
-                continue
-            mask = df["name"].astype(str).str.contains("1L", case=False, na=False)
-            row = df[mask].iloc[0] if mask.any() else df.iloc[0]
-            sell = row["sell_price"]
-            if pd.notna(sell):
-                new_points_gold.append([d, round(float(sell), 2)])
-        except Exception as e:
-            err = type(e).__name__
-            print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({err})")
-            if "rate" in str(e).lower() or "limit" in str(e).lower() or "429" in str(e):
-                print("  >> Rate limit GOLD_SJC, nghỉ 70 giây...")
-                time.sleep(70)
-        # Nghỉ 2 giây giữa mỗi ngày
-        time.sleep(2)
-
-    merged_gold = {v[0]: v[1] for v in old_values_gold}
-    merged_gold.update({p[0]: p[1] for p in new_points_gold})
+    merged_gold = {v[0]: v[1] for v in old_gold}
+    merged_gold.update(new_gold)
     values_gold = sorted(merged_gold.items())[-MAX_HISTORY_POINTS:]
     values_gold = [[d, v] for d, v in values_gold]
     results["GOLD_SJC"] = {
@@ -422,7 +447,7 @@ def fetch_vnstock_retail(existing_series):
         "freq"       : "daily",
         "values"     : values_gold,
     }
-    print(f"  vnstock [GOLD_SJC]: OK ({len(new_points_gold)} điểm mới, {len(values_gold)} điểm tổng)")
+    print(f"  vnstock [GOLD_SJC]: OK ({len(new_gold)} điểm mới, {len(values_gold)} điểm tổng)")
 
     return results
 
