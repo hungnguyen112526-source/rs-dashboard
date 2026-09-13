@@ -6,15 +6,19 @@ Nguồn:
 - FRED API (stlouisfed.org): DXY, 6 cặp tiền, CPI Mỹ, lãi suất Fed, GDP Mỹ
 - World Bank API (không cần key): CPI VN, GDP VN, FDI VN, thất nghiệp, XNK, cán cân
   vãng lai, cung tiền M2, sản xuất công nghiệp — theo NĂM
-- vnstock (không cần key riêng, dùng chung VNSTOCK_API_KEY): tỷ giá USD/VND
-  (Vietcombank) và giá vàng SJC — theo NGÀY. Vì 2 hàm này của vnstock chỉ trả về
-  giá trị tại 1 ngày cụ thể (không có sẵn "start/end" như FRED), lịch sử được xây
-  dần: mỗi lần script chạy sẽ đọc lại macro_data.json cũ, chỉ tải bù các ngày còn
-  thiếu (từ ngày cuối cùng đã có tới hôm nay) rồi nối vào, thay vì tải lại từ đầu.
+- vnstock (Vietcombank + SJC, gọi thẳng API — không qua wrapper Retail của vnstock,
+  xem lý do ở docstring _fetch_usdvnd_point/_fetch_gold_point): tỷ giá USD/VND và
+  giá vàng SJC — theo NGÀY. Vì 2 nguồn này chỉ trả về giá trị tại 1 ngày cụ thể (không
+  có sẵn "start/end" như FRED), lịch sử được xây dần: mỗi lần script chạy sẽ đọc lại
+  macro_data.json cũ, chỉ tải bù các ngày còn thiếu (từ ngày cuối cùng đã có tới hôm
+  nay) rồi nối vào, thay vì tải lại từ đầu.
 
 Cách dùng:
-- Local : đặt biến môi trường FRED_API_KEY và VNSTOCK_API_KEY rồi chạy `python fetch_macro.py`
-- GitHub Actions: đọc key từ GitHub Secret FRED_API_KEY / VNSTOCK_API_KEY
+- Local : đặt biến môi trường FRED_API_KEY rồi chạy `python fetch_macro.py`
+  (phần Vietcombank/SJC không cần key, tự chạy được luôn)
+- GitHub Actions: đọc key từ GitHub Secret FRED_API_KEY
+- Muốn tắt hẳn phần tỷ giá/vàng (nếu về sau thấy nguồn luôn bị chặn): đặt biến môi
+  trường SKIP_VNSTOCK_RETAIL=1
 """
 
 import os
@@ -27,7 +31,6 @@ from datetime import datetime, timezone, timedelta
 import pandas as pd
 
 FRED_API_KEY    = os.environ.get("FRED_API_KEY")
-VNSTOCK_API_KEY = os.environ.get("VNSTOCK_API_KEY")
 OUTPUT_FILE     = "macro_data.json"
 VN_TZ           = timezone(timedelta(hours=7))
 
@@ -369,24 +372,77 @@ def _missing_dates(existing_values, bootstrap_days=BOOTSTRAP_DAYS, max_backfill_
     return [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n_days)]
 
 
-def _fetch_usdvnd_point(retail, date_str):
-    """Gọi API lấy tỷ giá bán USD/VND tại 1 ngày cụ thể. Trả về float hoặc None
-    (None = không có dữ liệu ngày đó, ví dụ cuối tuần/lễ — không phải lỗi)."""
-    df = retail.exchange_rate(date=date_str)
-    if df is None or df.empty:
-        return None
-    row = df[df["currency_code"].astype(str).str.upper() == "USD"]
+def _fetch_usdvnd_point(date_str):
+    """Gọi TRỰC TIẾP API Vietcombank (không qua wrapper Retail của vnstock) để tự kiểm
+    soát timeout và phân biệt rõ ràng "lỗi thật" (network/HTTP) với "server trả về OK
+    nhưng ngày đó không có dữ liệu" (cuối tuần/lễ). Lý do phải tự viết lại thay vì dùng
+    Retail().exchange_rate(): hàm gốc của vnstock khi lỗi HTTP chỉ in ra màn hình rồi
+    trả về None — khiến vòng lặp phía trên không cách nào phân biệt được "lỗi" với
+    "không có dữ liệu", nên cơ chế circuit-breaker không đếm được lỗi và không dừng lại.
+
+    Trả về float, hoặc None nếu server phản hồi OK nhưng không có dữ liệu ngày đó.
+    Ném exception (request lỗi/timeout/HTTP status xấu/parse lỗi) nếu là lỗi thật."""
+    import base64
+    from io import BytesIO
+    import requests
+
+    url = f"https://www.vietcombank.com.vn/api/exchangerates/exportexcel?date={date_str}"
+    resp = requests.get(url, timeout=RETAIL_REQUEST_TIMEOUT_SEC)
+    resp.raise_for_status()  # 4xx/5xx -> ném HTTPError, được tính là lỗi thật
+
+    json_data = resp.json()
+    if "Data" not in json_data:
+        return None  # server phản hồi OK nhưng không có dữ liệu (vd cuối tuần)
+
+    excel_data = base64.b64decode(json_data["Data"])
+    df = pd.read_excel(BytesIO(excel_data), sheet_name="ExchangeRate")
+    df.columns = ["CurrencyCode", "CurrencyName", "Buy Cash", "Buy Transfer", "Sell"]
+    df = df.iloc[2:-4]
+
+    row = df[df["CurrencyCode"].astype(str).str.upper() == "USD"]
     if row.empty:
         return None
-    sell = row.iloc[0]["sell"]
+    sell = row.iloc[0]["Sell"]
     return round(float(sell), 2) if pd.notna(sell) else None
 
 
-def _fetch_gold_point(retail, date_str):
-    """Gọi API lấy giá bán vàng SJC 1 lượng tại 1 ngày cụ thể. Trả về float hoặc None."""
-    df = retail.gold(source="sjc", date=date_str)
-    if df is None or df.empty:
+def _fetch_gold_point(date_str):
+    """Gọi TRỰC TIẾP API SJC (không qua wrapper Retail của vnstock) — lý do giống hệt
+    _fetch_usdvnd_point ở trên. Trả về float, hoặc None nếu không có dữ liệu ngày đó.
+    Ném exception nếu là lỗi thật (network/HTTP/parse).
+
+    LƯU Ý: KHÔNG dùng vnstock.core.utils.user_agent.get_headers() nữa — hàm này tự gọi
+    mạng ra ngoài để lấy danh sách User-Agent (không liên quan gì tới việc lấy giá vàng),
+    và khi bị chặn nó tự in lỗi "Không thể kết nối đến API..." rồi NUỐT luôn exception
+    (không raise) -> code ở đây không phát hiện được, chỉ thấy log rác chứ không giúp gì.
+    Dùng thẳng 1 User-Agent tĩnh, không phụ thuộc thêm request mạng nào khác."""
+    import requests
+
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    payload = f"method=GetSJCGoldPriceByDate&toDate={d.strftime('%d/%m/%Y')}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+    url = "https://sjc.com.vn/GoldPrice/Services/PriceService.ashx"
+    resp = requests.post(url, headers=headers, data=payload, timeout=RETAIL_REQUEST_TIMEOUT_SEC)
+    resp.raise_for_status()
+
+    data = resp.json()
+    if not data.get("success"):
+        # Ghi log chẩn đoán: response HTTP 200 nhưng "success" không phải True -> cần biết
+        # SJC trả về gì (đổi API/đổi tham số/hết dữ liệu ngày đó...) để sửa tiếp nếu cần.
+        print(f"    [debug GOLD_SJC {date_str}] success=False, response: {str(data)[:200]}")
         return None
+    gold_data = data.get("data", [])
+    if not gold_data:
+        print(f"    [debug GOLD_SJC {date_str}] success=True nhưng data rỗng: {str(data)[:200]}")
+        return None
+
+    df = pd.DataFrame(gold_data)[["TypeName", "BranchName", "BuyValue", "SellValue"]]
+    df.columns = ["name", "branch", "buy_price", "sell_price"]
     # Ưu tiên dòng "SJC 1L" (vàng miếng 1 lượng, chuẩn tham chiếu phổ biến nhất);
     # nếu không tìm thấy tên khớp thì lấy dòng đầu tiên trả về.
     mask = df["name"].astype(str).str.contains("1L", case=False, na=False)
@@ -396,32 +452,16 @@ def _fetch_gold_point(retail, date_str):
 
 
 def fetch_vnstock_retail(existing_series):
-    """Lấy tỷ giá USD/VND (Vietcombank) và giá vàng SJC qua vnstock (dùng chung
-    VNSTOCK_API_KEY, không cần license riêng). 2 hàm này chỉ trả về giá trị tại
-    1 ngày cụ thể -> lịch sử được tích luỹ dần qua từng lần chạy (xem _missing_dates).
+    """Lấy tỷ giá USD/VND (Vietcombank) và giá vàng SJC (gọi thẳng API, xem lý do ở
+    docstring của _fetch_usdvnd_point/_fetch_gold_point). 2 nguồn này chỉ trả về giá trị
+    tại 1 ngày cụ thể -> lịch sử được tích luỹ dần qua từng lần chạy (xem _missing_dates).
 
     Cả 2 series được lấy trong CÙNG 1 vòng lặp theo ngày (thay vì 2 vòng lặp riêng)
-    để kiểm soát tổng số request/phút một cách nhất quán, tránh vượt hạn mức 60
-    requests/phút của gói Community. Có cơ chế tự tạm nghỉ dài (cooldown) khi nghi
-    ngờ bị chặn do gọi dồn dập, giống cách fetch_data.py xử lý với giá cổ phiếu.
+    để kiểm soát tổng số request/phút một cách nhất quán. Có cơ chế tự tạm nghỉ dài
+    (cooldown) rồi bỏ cuộc (circuit breaker) khi nghi ngờ nguồn đang chặn IP, tránh
+    script chạy hàng chục phút vô ích như trước.
 
     Trả về dict {key: {meta, values}}, đã gộp với lịch sử cũ."""
-    try:
-        from vnstock import Retail
-    except ImportError:
-        print("  LỖI: Chưa cài vnstock. Chạy: pip install vnstock")
-        return {}
-
-    if VNSTOCK_API_KEY:
-        try:
-            import vnai
-            vnai.setup_api_key(VNSTOCK_API_KEY)
-        except Exception as e:
-            print(f"  CẢNH BÁO: Không setup được VNSTOCK_API_KEY ({e}), vẫn thử chạy tiếp vì "
-                  f"tỷ giá/vàng không bắt buộc cần key.")
-
-    retail = Retail()
-
     old_usdvnd = existing_series.get("USDVND", {}).get("values", [])
     old_gold   = existing_series.get("GOLD_SJC", {}).get("values", [])
     dates = sorted(set(_missing_dates(old_usdvnd)) | set(_missing_dates(old_gold)))
@@ -442,7 +482,7 @@ def fetch_vnstock_retail(existing_series):
 
         if not aborted_usdvnd:
             try:
-                v = _call_with_timeout(_fetch_usdvnd_point, RETAIL_REQUEST_TIMEOUT_SEC, retail, d)
+                v = _call_with_timeout(_fetch_usdvnd_point, RETAIL_REQUEST_TIMEOUT_SEC, d)
                 if v is not None:
                     new_usdvnd[d] = v
                 err_usdvnd = 0
@@ -464,7 +504,7 @@ def fetch_vnstock_retail(existing_series):
 
         if not aborted_gold:
             try:
-                v = _call_with_timeout(_fetch_gold_point, RETAIL_REQUEST_TIMEOUT_SEC, retail, d)
+                v = _call_with_timeout(_fetch_gold_point, RETAIL_REQUEST_TIMEOUT_SEC, d)
                 if v is not None:
                     new_gold[d] = v
                 err_gold = 0
@@ -530,9 +570,9 @@ def main():
     print("\n[2] World Bank API (Việt Nam)...")
     wb_data = fetch_worldbank()
 
-    print("\n[3] vnstock - Vietcombank & SJC (Việt Nam)...")
-    if not VNSTOCK_API_KEY:
-        print("  Bỏ qua: không tìm thấy VNSTOCK_API_KEY trong biến môi trường.")
+    print("\n[3] Vietcombank & SJC (Việt Nam, gọi thẳng API công khai)...")
+    if os.environ.get("SKIP_VNSTOCK_RETAIL"):
+        print("  Bỏ qua: biến môi trường SKIP_VNSTOCK_RETAIL đang được bật.")
         vnstock_data = {}
     else:
         existing_series = load_existing_macro()
