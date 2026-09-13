@@ -313,6 +313,15 @@ th:first-child { z-index:3; }
 .search-box:focus { outline:none; border-color: var(--accent); }
 .table-count { color: var(--text-mute); font-size:12px; white-space:nowrap; }
 
+.fed-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:14px; }
+.fed-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:14px; }
+.fed-card-title { font-size:14px; font-weight:700; color: var(--text); margin-bottom:10px; }
+.fed-legend { display:flex; flex-wrap:wrap; gap:10px 16px; margin-bottom:10px; font-size:12px; color: var(--text-dim); }
+.fed-legend-item { display:flex; align-items:center; gap:6px; }
+.fed-legend-swatch { width:10px; height:10px; border-radius:2px; display:inline-block; flex-shrink:0; }
+.fed-svg-wrap svg { width:100%; height:auto; display:block; }
+.fed-note { font-size:12px; color: var(--text-mute); margin-top:10px; }
+
 @media (max-width: 640px) {
   body { padding: 14px; }
   .page-nav { margin: -14px -14px 16px; padding: 10px 14px; }
@@ -321,6 +330,7 @@ th:first-child { z-index:3; }
   #chart-panel, #group-panel { padding: 12px; width: 96vw; }
   .refresh-hint { display:none; }
   th, td { font-size: 13px; padding: 8px 10px; }
+  .fed-grid { grid-template-columns: 1fr; }
 }
 """
 
@@ -777,6 +787,94 @@ function initMacroChart() {
 }
 initMacroChart();
 
+// ---------- Dự báo Fed (Summary of Economic Projections) - biểu đồ cột nhóm theo vintage ----------
+const FED_VINTAGE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#a78bfa', '#f472b6'];
+
+function renderFedProjection(key) {
+  const entry = MACRO_DATA.fed_projections && MACRO_DATA.fed_projections[key];
+  const chartEl = document.getElementById('fed-chart-' + key);
+  const legendEl = document.getElementById('fed-legend-' + key);
+  if (!entry || !chartEl || !legendEl || !entry.vintages || !entry.vintages.length) return;
+
+  const vintages = entry.vintages;
+  // Hợp tất cả các năm xuất hiện ở bất kỳ vintage nào, sắp xếp tăng dần
+  const yearSet = new Set();
+  vintages.forEach(v => Object.keys(v.data).forEach(y => yearSet.add(y)));
+  const years = Array.from(yearSet).sort();
+  if (!years.length) return;
+
+  // Legend
+  legendEl.innerHTML = vintages.map((v, i) => (
+    '<span class="fed-legend-item">' +
+      '<span class="fed-legend-swatch" style="background:' + FED_VINTAGE_COLORS[i % FED_VINTAGE_COLORS.length] + '"></span>' +
+      'Vintage: ' + v.vintage +
+    '</span>'
+  )).join('');
+
+  // Vẽ SVG cột nhóm: mỗi năm 1 nhóm, mỗi nhóm có N cột (N = số vintage), màu khác nhau
+  const width = Math.max(chartEl.clientWidth || 360, 260);
+  const height = 260;
+  const padL = 40, padR = 10, padT = 14, padB = 28;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+
+  let maxVal = -Infinity, minVal = Infinity;
+  vintages.forEach(v => years.forEach(y => {
+    if (v.data[y] !== undefined) {
+      maxVal = Math.max(maxVal, v.data[y]);
+      minVal = Math.min(minVal, v.data[y]);
+    }
+  }));
+  if (!isFinite(maxVal)) return;
+  minVal = Math.min(0, minVal);           // luôn bắt đầu trục từ 0 (hoặc thấp hơn nếu có giá trị âm)
+  maxVal = maxVal * 1.15 || 1;            // chừa khoảng trống phía trên
+
+  const yScale = v => plotH - ((v - minVal) / (maxVal - minVal || 1)) * plotH;
+  const groupW = plotW / years.length;
+  const barGap = 4;
+  const barW = Math.max((groupW - barGap * 2) / vintages.length, 2);
+
+  let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg">';
+
+  // Gridlines ngang (5 mốc) + nhãn giá trị
+  const gridLines = 4;
+  for (let i = 0; i <= gridLines; i++) {
+    const val = minVal + (maxVal - minVal) * (i / gridLines);
+    const y = padT + yScale(val);
+    svg += '<line x1="' + padL + '" y1="' + y + '" x2="' + (width - padR) + '" y2="' + y + '" stroke="#22304a" stroke-width="1"/>';
+    svg += '<text x="' + (padL - 6) + '" y="' + (y + 3) + '" text-anchor="end" font-size="10" fill="#8492a6">' + val.toFixed(1) + '</text>';
+  }
+
+  // Cột theo từng năm/vintage
+  years.forEach((year, gi) => {
+    const groupX = padL + gi * groupW;
+    vintages.forEach((v, vi) => {
+      const val = v.data[year];
+      if (val === undefined) return;
+      const barH = plotH - yScale(val);
+      const x = groupX + barGap + vi * barW;
+      const y = padT + yScale(val);
+      svg += '<rect x="' + x + '" y="' + y + '" width="' + (barW - 2) + '" height="' + barH +
+             '" fill="' + FED_VINTAGE_COLORS[vi % FED_VINTAGE_COLORS.length] + '" rx="2"/>';
+    });
+    // Nhãn năm dưới trục X
+    svg += '<text x="' + (groupX + groupW / 2) + '" y="' + (height - 8) +
+           '" text-anchor="middle" font-size="11" fill="#cbd5e1">' + year + '</text>';
+  });
+
+  svg += '</svg>';
+  chartEl.innerHTML = svg;
+}
+
+function initFedProjections() {
+  if (!MACRO_DATA.fed_projections) return;
+  Object.keys(MACRO_DATA.fed_projections).forEach(key => renderFedProjection(key));
+  window.addEventListener('resize', () => {
+    Object.keys(MACRO_DATA.fed_projections).forEach(key => renderFedProjection(key));
+  });
+}
+initFedProjections();
+
 window.addEventListener('scroll', () => {
   const btn = document.getElementById('back-to-top');
   if (btn) btn.style.display = (window.scrollY > 400) ? 'flex' : 'none';
@@ -1150,14 +1248,42 @@ def main():
                 opts_html += f'<option value="{key}">{label}</option>'
             opts_html += "</optgroup>"
 
+        fed_projections = macro_data.get("fed_projections", {})
+        fed_vintage_count = 0
+        for _fp in fed_projections.values():
+            fed_vintage_count = max(fed_vintage_count, len(_fp.get("vintages", [])))
+
         macro_body = f"""
 <div class="card" id="section-macro">
   <div class="section-title">🌐 Dữ liệu vĩ mô</div>
-  <div class="hint">Nguồn: FRED (Mỹ) · World Bank (VN) · vnstock - Vietcombank &amp; SJC (VN) · Cập nhật lần cuối: {updated}</div>
+  <div class="hint">Nguồn: FRED (Mỹ) · World Bank (VN) · yfinance (tỷ giá USD/VND &amp; vàng thế giới) · Cập nhật lần cuối: {updated}</div>
   <div class="hint"><span style="color:#60a5fa">—</span> Chọn chỉ số từ dropdown để xem biểu đồ</div>
   <select id="macro-select" class="index-select">{opts_html}</select>
   <div id="macro-chart-container"></div>
   <div id="macro-description" class="hint" style="margin-top:8px;font-style:italic;"></div>
+</div>
+"""
+
+        if fed_projections:
+            macro_body += f"""
+<div class="card" id="section-fed-projections">
+  <div class="section-title">📈 Dự báo kinh tế của Fed (Summary of Economic Projections)</div>
+  <div class="hint">Mỗi lần họp FOMC (thường 4 lần/năm: tháng 3, 6, 9, 12) Fed công bố lại 1 bộ dự báo mới —
+  biểu đồ dưới so sánh {fed_vintage_count} lần công bố gần nhất để thấy dự báo đang thay đổi ra sao qua thời gian.</div>
+  <div class="fed-grid">
+    <div class="fed-card">
+      <div class="fed-card-title">Dự báo Fed Funds Rate</div>
+      <div id="fed-legend-fed_funds_rate" class="fed-legend"></div>
+      <div id="fed-chart-fed_funds_rate" class="fed-svg-wrap"></div>
+      <div class="fed-note">Nguồn: FOMC Summary of Economic Projections, qua FRED (mã: FEDTARMD)</div>
+    </div>
+    <div class="fed-card">
+      <div class="fed-card-title">Dự báo Lạm phát Core PCE</div>
+      <div id="fed-legend-core_pce" class="fed-legend"></div>
+      <div id="fed-chart-core_pce" class="fed-svg-wrap"></div>
+      <div class="fed-note">Nguồn: FOMC Summary of Economic Projections, qua FRED (mã: JCXFEMD)</div>
+    </div>
+  </div>
 </div>
 """
         macro_script = MACRO_SCRIPT.replace("%%MACRO_DATA_JSON%%", macro_data_json)
