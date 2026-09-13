@@ -199,8 +199,9 @@ def fetch_fred(api_key):
 
     fred    = Fred(api_key=api_key)
     results = {}
+    total   = len(FRED_SERIES)
 
-    for key, meta in FRED_SERIES.items():
+    for i, (key, meta) in enumerate(FRED_SERIES.items()):
         try:
             series = fred.get_series(meta["id"], observation_start=START_DATE)
             series = series.dropna()
@@ -222,10 +223,15 @@ def fetch_fred(api_key):
                 "freq"       : meta.get("freq", "daily"),
                 "values"     : values,
             }
-            print(f"  FRED [{key}]: OK ({len(values)} điểm)")
+            print(f"  FRED [{i+1}/{total}] {key}: OK ({len(values)} điểm)")
 
         except Exception as e:
-            print(f"  FRED [{key}]: LỖI - {e}")
+            print(f"  FRED [{i+1}/{total}] {key}: LỖI - {e}")
+
+        # Nghỉ 6 giây giữa các request để tránh rate limit (60 req/phút = 1 req/giây)
+        # Dùng 6 giây để an toàn (chỉ ~10 req/phút thay vì giới hạn 60)
+        if i < total - 1:
+            time.sleep(6)
 
     return results
 
@@ -238,18 +244,18 @@ def fetch_worldbank():
         print("LỖI: Chưa cài wbgapi. Chạy: pip install wbgapi")
         return {}
 
-    results = {}
+    results    = {}
     start_year = int(START_DATE[:4])
+    total      = len(WORLDBANK_SERIES)
 
-    for key, meta in WORLDBANK_SERIES.items():
+    for i, (key, meta) in enumerate(WORLDBANK_SERIES.items()):
         try:
             df = wb.data.DataFrame(meta["id"], "VNM", mrv=30)
             if df.empty:
-                print(f"  WorldBank [{key}]: Không có dữ liệu")
+                print(f"  WorldBank [{i+1}/{total}] {key}: Không có dữ liệu")
                 continue
 
-            # df có index là mã chỉ tiêu, cột là năm dạng "YR2020"
-            row = df.iloc[0]
+            row    = df.iloc[0]
             values = []
             for col, val in row.items():
                 year_str = str(col).replace("YR", "")
@@ -271,10 +277,14 @@ def fetch_worldbank():
                 "freq"       : "yearly",
                 "values"     : values,
             }
-            print(f"  WorldBank [{key}]: OK ({len(values)} điểm)")
+            print(f"  WorldBank [{i+1}/{total}] {key}: OK ({len(values)} điểm)")
 
         except Exception as e:
-            print(f"  WorldBank [{key}]: LỖI - {e}")
+            print(f"  WorldBank [{i+1}/{total}] {key}: LỖI - {e}")
+
+        # Nghỉ 5 giây giữa các request World Bank
+        if i < total - 1:
+            time.sleep(5)
 
     return results
 
@@ -344,7 +354,7 @@ def fetch_vnstock_retail(existing_series):
     old_values = existing_series.get("USDVND", {}).get("values", [])
     dates_to_fetch = _missing_dates(old_values)
     new_points = []
-    for d in dates_to_fetch:
+    for i, d in enumerate(dates_to_fetch):
         try:
             df = retail.exchange_rate(date=d)
             if df is None or df.empty:
@@ -356,8 +366,14 @@ def fetch_vnstock_retail(existing_series):
             if pd.notna(sell):
                 new_points.append([d, round(float(sell), 2)])
         except Exception as e:
-            print(f"  vnstock [USDVND] {d}: bỏ qua ({type(e).__name__})")
-        time.sleep(1)  # lịch sự với server Vietcombank, tránh gọi dồn dập
+            err = type(e).__name__
+            print(f"  vnstock [USDVND] {d}: bỏ qua ({err})")
+            # Nếu lỗi có vẻ là rate limit → nghỉ lâu hơn rồi tiếp tục
+            if "rate" in str(e).lower() or "limit" in str(e).lower() or "429" in str(e):
+                print("  >> Rate limit USDVND, nghỉ 70 giây...")
+                time.sleep(70)
+        # Nghỉ 2 giây giữa mỗi ngày (30 req/phút, an toàn với limit 60 req/phút)
+        time.sleep(2)
 
     merged = {v[0]: v[1] for v in old_values}
     merged.update({p[0]: p[1] for p in new_points})
@@ -376,21 +392,24 @@ def fetch_vnstock_retail(existing_series):
     old_values_gold = existing_series.get("GOLD_SJC", {}).get("values", [])
     dates_to_fetch_gold = _missing_dates(old_values_gold)
     new_points_gold = []
-    for d in dates_to_fetch_gold:
+    for i, d in enumerate(dates_to_fetch_gold):
         try:
             df = retail.gold(source="sjc", date=d)
             if df is None or df.empty:
                 continue
-            # Ưu tiên dòng "SJC 1L" (vàng miếng 1 lượng, chuẩn tham chiếu phổ biến nhất);
-            # nếu không tìm thấy tên khớp thì lấy dòng đầu tiên trả về.
             mask = df["name"].astype(str).str.contains("1L", case=False, na=False)
             row = df[mask].iloc[0] if mask.any() else df.iloc[0]
             sell = row["sell_price"]
             if pd.notna(sell):
                 new_points_gold.append([d, round(float(sell), 2)])
         except Exception as e:
-            print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({type(e).__name__})")
-        time.sleep(1)
+            err = type(e).__name__
+            print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({err})")
+            if "rate" in str(e).lower() or "limit" in str(e).lower() or "429" in str(e):
+                print("  >> Rate limit GOLD_SJC, nghỉ 70 giây...")
+                time.sleep(70)
+        # Nghỉ 2 giây giữa mỗi ngày
+        time.sleep(2)
 
     merged_gold = {v[0]: v[1] for v in old_values_gold}
     merged_gold.update({p[0]: p[1] for p in new_points_gold})
