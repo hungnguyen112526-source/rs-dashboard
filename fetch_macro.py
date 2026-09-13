@@ -1,96 +1,45 @@
 """
-Script lấy dữ liệu vĩ mô từ FRED (Mỹ), World Bank (Việt Nam) và vnstock (Việt Nam).
-Lưu kết quả vào macro_data.json để generate_report.py đọc và hiển thị trên dashboard.
+Script lấy dữ liệu vĩ mô từ FRED (Mỹ), World Bank (Việt Nam) và yfinance (tỷ giá
+USD/VND + giá vàng thế giới). Lưu kết quả vào macro_data.json để generate_report.py
+đọc và hiển thị trên dashboard.
 
 Nguồn:
-- FRED API (stlouisfed.org): DXY, 6 cặp tiền, CPI Mỹ, lãi suất Fed, GDP Mỹ
+- FRED API (stlouisfed.org): DXY, 6 cặp tiền, CPI Mỹ, lãi suất Fed, GDP Mỹ, và
+  dự báo SEP (Summary of Economic Projections) của Fed — xem fetch_fed_projections()
 - World Bank API (không cần key): CPI VN, GDP VN, FDI VN, thất nghiệp, XNK, cán cân
   vãng lai, cung tiền M2, sản xuất công nghiệp — theo NĂM
-- vnstock (Vietcombank + SJC, gọi thẳng API — không qua wrapper Retail của vnstock,
-  xem lý do ở docstring _fetch_usdvnd_point/_fetch_gold_point): tỷ giá USD/VND và
-  giá vàng SJC — theo NGÀY. Vì 2 nguồn này chỉ trả về giá trị tại 1 ngày cụ thể (không
-  có sẵn "start/end" như FRED), lịch sử được xây dần: mỗi lần script chạy sẽ đọc lại
-  macro_data.json cũ, chỉ tải bù các ngày còn thiếu (từ ngày cuối cùng đã có tới hôm
-  nay) rồi nối vào, thay vì tải lại từ đầu.
+- yfinance (không cần key): tỷ giá USD/VND (ticker VND=X) và giá vàng thế giới
+  (ticker GC=F, USD/troy ounce) — theo NGÀY.
+
+  Lưu ý quan trọng: trước đây thử lấy tỷ giá niêm yết Vietcombank + giá vàng SJC bằng
+  cách gọi thẳng API của các trang này, nhưng IP của GitHub Actions liên tục bị chặn
+  (403/lỗi kết nối ở MỌI lần gọi, không phải ngẫu nhiên) -> đã bỏ hẳn cách này, chuyển
+  sang yfinance vì đây là nguồn quốc tế, không chặn IP datacenter. Đánh đổi: số liệu là
+  tỷ giá/giá vàng THỊ TRƯỜNG QUỐC TẾ, không phải giá niêm yết Vietcombank/SJC trong nước.
+  yfinance cho tải cả 1 khoảng thời gian dài trong 1 lần gọi (khác Vietcombank/SJC chỉ
+  cho lấy từng ngày một) nên code ở đây đơn giản hơn nhiều — không cần cơ chế tích luỹ
+  dần/circuit breaker phức tạp như bản cũ nữa.
 
 Cách dùng:
 - Local : đặt biến môi trường FRED_API_KEY rồi chạy `python fetch_macro.py`
-  (phần Vietcombank/SJC không cần key, tự chạy được luôn)
 - GitHub Actions: đọc key từ GitHub Secret FRED_API_KEY
-- Muốn tắt hẳn phần tỷ giá/vàng (nếu về sau thấy nguồn luôn bị chặn): đặt biến môi
-  trường SKIP_VNSTOCK_RETAIL=1
 """
 
 import os
 import sys
 import json
-import time
-import threading
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 
-FRED_API_KEY    = os.environ.get("FRED_API_KEY")
-OUTPUT_FILE     = "macro_data.json"
-VN_TZ           = timezone(timedelta(hours=7))
+FRED_API_KEY = os.environ.get("FRED_API_KEY")
+OUTPUT_FILE  = "macro_data.json"
+VN_TZ        = timezone(timedelta(hours=7))
 
-# Số ngày tối đa tải bù (backfill) trong 1 lần chạy cho dữ liệu vnstock (tỷ giá/vàng).
-# Lần chạy đầu tiên (chưa có lịch sử) sẽ backfill BOOTSTRAP_DAYS ngày gần nhất.
-# Các lần chạy sau chỉ tải bù đúng số ngày còn thiếu (thường chỉ 1 ngày/lần chạy
-# hàng ngày), MAX_BACKFILL_DAYS chỉ là chặn trên đề phòng script bị gián đoạn lâu ngày.
-# Lưu ý: gói vnstock Community giới hạn 60 requests/phút, nên BOOTSTRAP_DAYS không nên
-# quá lớn (2 series x N ngày = 2N requests cho lần chạy đầu) — 20 ngày là đủ cho biểu đồ
-# ban đầu có hình dạng, các lần chạy sau sẽ tự nối dài thêm mỗi ngày.
-BOOTSTRAP_DAYS      = 20
-MAX_BACKFILL_DAYS   = 90
-MAX_HISTORY_POINTS  = 500  # giới hạn số điểm lưu lại cho mỗi series vnstock, tránh phình file mãi
-
-# Nghỉ giữa mỗi lần gọi API vnstock (giây). Giới hạn Community là 60 requests/phút và
-# mỗi lệnh gọi thực tế tốn nhiều hơn 1 "request" (có thêm ping đo lường nội bộ của vnstock),
-# nên cần nghỉ khá rộng rãi để không bị chặn — 3s/lần tương đương tối đa ~20 lần/phút.
-RETAIL_REQUEST_DELAY       = 3
-RETAIL_COOLDOWN_AFTER_ERRORS = 3    # số lỗi (exception) liên tiếp trước khi tạm nghỉ dài
-RETAIL_COOLDOWN_SECONDS      = 65   # nghỉ hơn 1 phút để chờ cửa sổ rate-limit reset
-
-# Bản thân các hàm exchange_rate()/gold() của vnstock KHÔNG đặt timeout cho request HTTP
-# bên trong -> nếu SJC/Vietcombank chặn hoặc làm chậm IP của máy chạy script (rất dễ xảy ra
-# với IP datacenter của GitHub Actions), request có thể treo rất lâu (nhiều phút) thay vì
-# báo lỗi ngay. Ta tự bọc timeout cứng bên ngoài để tránh script bị "treo" hàng chục phút.
-RETAIL_REQUEST_TIMEOUT_SEC = 10
-
-# "Circuit breaker": nếu sau khi đã nghỉ dài (cooldown) mà vẫn tiếp tục lỗi liên tiếp,
-# nghĩa là nguồn đang bị chặn thật sự (không phải rate-limit tạm thời) -> bỏ cuộc luôn
-# cho chuỗi đó trong lần chạy này thay vì cứ lặp lại nghỉ-thử-nghỉ-thử tới hết danh sách
-# ngày, tránh script chạy hàng chục phút một cách vô ích.
-RETAIL_MAX_COOLDOWNS_PER_SERIES = 1
-
-
-def _call_with_timeout(fn, timeout_sec, *args, **kwargs):
-    """Gọi fn(*args, **kwargs) nhưng giới hạn thời gian chờ tối đa timeout_sec giây.
-    Ném TimeoutError nếu quá hạn (dùng cho các hàm vnstock không tự có timeout).
-
-    Dùng threading.Thread(daemon=True) thay vì ThreadPoolExecutor: nếu dùng
-    ThreadPoolExecutor với "with...as" thì lúc thoát khối with sẽ gọi shutdown(wait=True),
-    khiến chương trình VẪN bị treo chờ thread con xong dù đã "timeout" ở future.result() —
-    vô hiệu hoá hoàn toàn mục đích của timeout. Thread daemon=True thì nếu bị treo thật,
-    nó sẽ bị bỏ lại chạy nền và không chặn tiến trình chính thoát."""
-    result = {}
-    error = {}
-
-    def _target():
-        try:
-            result["value"] = fn(*args, **kwargs)
-        except Exception as e:
-            error["exc"] = e
-
-    t = threading.Thread(target=_target, daemon=True)
-    t.start()
-    t.join(timeout=timeout_sec)
-    if t.is_alive():
-        raise TimeoutError(f"Vượt quá {timeout_sec}s không phản hồi (có thể nguồn đang chặn/chậm)")
-    if "exc" in error:
-        raise error["exc"]
-    return result.get("value")
+# Số vintage (đợt công bố SEP) gần nhất giữ lại cho biểu đồ dự báo Fed — mỗi năm Fed
+# họp 4 lần (3/6/9/12) và công bố lại dự báo mỗi lần, giữ 3 vintage gần nhất là đủ để
+# so sánh xu hướng thay đổi dự báo qua các kỳ mà không làm biểu đồ quá rối.
+FED_PROJECTION_VINTAGES_TO_KEEP = 3
 
 # ============================================================
 # Danh sách series FRED cần lấy
@@ -333,228 +282,155 @@ def fetch_worldbank():
     return results
 
 
-def load_existing_macro():
-    """Đọc lại macro_data.json cũ (nếu có) để lấy lịch sử series vnstock (tỷ giá/vàng)
-    đã tích luỹ từ các lần chạy trước — vì 2 hàm này chỉ trả giá trị tại 1 ngày,
-    không có sẵn "start/end" như FRED nên phải tự nối dần theo thời gian."""
-    if not os.path.exists(OUTPUT_FILE):
-        return {}
+# ============================================================
+# Tỷ giá USD/VND + giá vàng thế giới (qua yfinance)
+# ============================================================
+YFINANCE_SERIES = {
+    "USDVND": {
+        "ticker"     : "VND=X",
+        "label"      : "Tỷ giá USD/VND (thị trường quốc tế)",
+        "group"      : "Tỷ giá & Vàng (Việt Nam)",
+        "description": "Tỷ giá USD/VND tổng hợp từ thị trường quốc tế qua yfinance — "
+                        "KHÔNG phải giá niêm yết tại quầy Vietcombank (nguồn cũ liên tục bị "
+                        "chặn IP khi chạy trên GitHub Actions nên đã đổi sang nguồn này).",
+    },
+    "GOLD_WORLD": {
+        "ticker"     : "GC=F",
+        "label"      : "Giá vàng thế giới (USD/oz)",
+        "group"      : "Tỷ giá & Vàng (Việt Nam)",
+        "description": "Giá vàng giao sau (COMEX) thị trường thế giới, đơn vị USD/troy ounce — "
+                        "KHÔNG phải giá vàng miếng SJC trong nước (yfinance không có dữ liệu này).",
+    },
+}
+
+
+def fetch_yfinance_retail():
+    """Lấy tỷ giá USD/VND và giá vàng thế giới qua yfinance.
+
+    Khác hẳn cách gọi Vietcombank/SJC trước đây (chỉ trả về giá trị tại 1 ngày cụ thể,
+    phải tích luỹ dần qua từng lần chạy + cần circuit breaker vì hay bị chặn IP),
+    yfinance cho tải CẢ MỘT KHOẢNG THỜI GIAN DÀI trong 1 lần gọi duy nhất (giống cách
+    lấy FRED) -> code đơn giản hơn nhiều, không cần tích luỹ/circuit breaker nữa."""
     try:
-        with open(OUTPUT_FILE, encoding="utf-8") as f:
-            old = json.load(f)
-        return old.get("series", {})
-    except Exception as e:
-        print(f"  CẢNH BÁO: Không đọc được {OUTPUT_FILE} cũ để lấy lịch sử vnstock: {e}")
+        import yfinance as yf
+    except ImportError:
+        print("  LỖI: Chưa cài yfinance. Chạy: pip install yfinance")
         return {}
-
-
-def _missing_dates(existing_values, bootstrap_days=BOOTSTRAP_DAYS, max_backfill_days=MAX_BACKFILL_DAYS):
-    """Tính danh sách ngày (chuỗi YYYY-MM-DD) còn thiếu, cần tải bù, dựa trên điểm dữ liệu
-    cuối cùng đã có. Nếu chưa có dữ liệu nào (lần chạy đầu) -> backfill bootstrap_days ngày
-    gần nhất. Nếu đã có -> chỉ tải từ ngày sau điểm cuối tới hôm nay (chặn trên
-    max_backfill_days đề phòng script bị gián đoạn lâu ngày không chạy)."""
-    today = datetime.now(VN_TZ).date()
-
-    if not existing_values:
-        start = today - timedelta(days=bootstrap_days)
-    else:
-        last_date_str = max(v[0] for v in existing_values)
-        last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
-        start = last_date + timedelta(days=1)
-        earliest_allowed = today - timedelta(days=max_backfill_days)
-        if start < earliest_allowed:
-            start = earliest_allowed
-
-    if start > today:
-        return []
-
-    n_days = (today - start).days + 1
-    return [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n_days)]
-
-
-def _fetch_usdvnd_point(date_str):
-    """Gọi TRỰC TIẾP API Vietcombank (không qua wrapper Retail của vnstock) để tự kiểm
-    soát timeout và phân biệt rõ ràng "lỗi thật" (network/HTTP) với "server trả về OK
-    nhưng ngày đó không có dữ liệu" (cuối tuần/lễ). Lý do phải tự viết lại thay vì dùng
-    Retail().exchange_rate(): hàm gốc của vnstock khi lỗi HTTP chỉ in ra màn hình rồi
-    trả về None — khiến vòng lặp phía trên không cách nào phân biệt được "lỗi" với
-    "không có dữ liệu", nên cơ chế circuit-breaker không đếm được lỗi và không dừng lại.
-
-    Trả về float, hoặc None nếu server phản hồi OK nhưng không có dữ liệu ngày đó.
-    Ném exception (request lỗi/timeout/HTTP status xấu/parse lỗi) nếu là lỗi thật."""
-    import base64
-    from io import BytesIO
-    import requests
-
-    url = f"https://www.vietcombank.com.vn/api/exchangerates/exportexcel?date={date_str}"
-    resp = requests.get(url, timeout=RETAIL_REQUEST_TIMEOUT_SEC)
-    resp.raise_for_status()  # 4xx/5xx -> ném HTTPError, được tính là lỗi thật
-
-    json_data = resp.json()
-    if "Data" not in json_data:
-        return None  # server phản hồi OK nhưng không có dữ liệu (vd cuối tuần)
-
-    excel_data = base64.b64decode(json_data["Data"])
-    df = pd.read_excel(BytesIO(excel_data), sheet_name="ExchangeRate")
-    df.columns = ["CurrencyCode", "CurrencyName", "Buy Cash", "Buy Transfer", "Sell"]
-    df = df.iloc[2:-4]
-
-    row = df[df["CurrencyCode"].astype(str).str.upper() == "USD"]
-    if row.empty:
-        return None
-    sell = row.iloc[0]["Sell"]
-    return round(float(sell), 2) if pd.notna(sell) else None
-
-
-def _fetch_gold_point(date_str):
-    """Gọi TRỰC TIẾP API SJC (không qua wrapper Retail của vnstock) — lý do giống hệt
-    _fetch_usdvnd_point ở trên. Trả về float, hoặc None nếu không có dữ liệu ngày đó.
-    Ném exception nếu là lỗi thật (network/HTTP/parse).
-
-    LƯU Ý: KHÔNG dùng vnstock.core.utils.user_agent.get_headers() nữa — hàm này tự gọi
-    mạng ra ngoài để lấy danh sách User-Agent (không liên quan gì tới việc lấy giá vàng),
-    và khi bị chặn nó tự in lỗi "Không thể kết nối đến API..." rồi NUỐT luôn exception
-    (không raise) -> code ở đây không phát hiện được, chỉ thấy log rác chứ không giúp gì.
-    Dùng thẳng 1 User-Agent tĩnh, không phụ thuộc thêm request mạng nào khác."""
-    import requests
-
-    d = datetime.strptime(date_str, "%Y-%m-%d")
-    payload = f"method=GetSJCGoldPriceByDate&toDate={d.strftime('%d/%m/%Y')}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-
-    url = "https://sjc.com.vn/GoldPrice/Services/PriceService.ashx"
-    resp = requests.post(url, headers=headers, data=payload, timeout=RETAIL_REQUEST_TIMEOUT_SEC)
-    resp.raise_for_status()
-
-    data = resp.json()
-    if not data.get("success"):
-        # Ghi log chẩn đoán: response HTTP 200 nhưng "success" không phải True -> cần biết
-        # SJC trả về gì (đổi API/đổi tham số/hết dữ liệu ngày đó...) để sửa tiếp nếu cần.
-        print(f"    [debug GOLD_SJC {date_str}] success=False, response: {str(data)[:200]}")
-        return None
-    gold_data = data.get("data", [])
-    if not gold_data:
-        print(f"    [debug GOLD_SJC {date_str}] success=True nhưng data rỗng: {str(data)[:200]}")
-        return None
-
-    df = pd.DataFrame(gold_data)[["TypeName", "BranchName", "BuyValue", "SellValue"]]
-    df.columns = ["name", "branch", "buy_price", "sell_price"]
-    # Ưu tiên dòng "SJC 1L" (vàng miếng 1 lượng, chuẩn tham chiếu phổ biến nhất);
-    # nếu không tìm thấy tên khớp thì lấy dòng đầu tiên trả về.
-    mask = df["name"].astype(str).str.contains("1L", case=False, na=False)
-    row = df[mask].iloc[0] if mask.any() else df.iloc[0]
-    sell = row["sell_price"]
-    return round(float(sell), 2) if pd.notna(sell) else None
-
-
-def fetch_vnstock_retail(existing_series):
-    """Lấy tỷ giá USD/VND (Vietcombank) và giá vàng SJC (gọi thẳng API, xem lý do ở
-    docstring của _fetch_usdvnd_point/_fetch_gold_point). 2 nguồn này chỉ trả về giá trị
-    tại 1 ngày cụ thể -> lịch sử được tích luỹ dần qua từng lần chạy (xem _missing_dates).
-
-    Cả 2 series được lấy trong CÙNG 1 vòng lặp theo ngày (thay vì 2 vòng lặp riêng)
-    để kiểm soát tổng số request/phút một cách nhất quán. Có cơ chế tự tạm nghỉ dài
-    (cooldown) rồi bỏ cuộc (circuit breaker) khi nghi ngờ nguồn đang chặn IP, tránh
-    script chạy hàng chục phút vô ích như trước.
-
-    Trả về dict {key: {meta, values}}, đã gộp với lịch sử cũ."""
-    old_usdvnd = existing_series.get("USDVND", {}).get("values", [])
-    old_gold   = existing_series.get("GOLD_SJC", {}).get("values", [])
-    dates = sorted(set(_missing_dates(old_usdvnd)) | set(_missing_dates(old_gold)))
-
-    new_usdvnd = {}
-    new_gold   = {}
-    err_usdvnd = 0
-    err_gold   = 0
-    cooldowns_usdvnd = 0
-    cooldowns_gold   = 0
-    aborted_usdvnd = False
-    aborted_gold   = False
-
-    for d in dates:
-        if aborted_usdvnd and aborted_gold:
-            print("  vnstock: cả 2 chuỗi đều đã bỏ cuộc (nguồn có vẻ đang chặn IP này) — dừng sớm.")
-            break
-
-        if not aborted_usdvnd:
-            try:
-                v = _call_with_timeout(_fetch_usdvnd_point, RETAIL_REQUEST_TIMEOUT_SEC, d)
-                if v is not None:
-                    new_usdvnd[d] = v
-                err_usdvnd = 0
-            except Exception as e:
-                print(f"  vnstock [USDVND] {d}: bỏ qua ({type(e).__name__})")
-                err_usdvnd += 1
-            time.sleep(RETAIL_REQUEST_DELAY)
-
-            if err_usdvnd >= RETAIL_COOLDOWN_AFTER_ERRORS:
-                if cooldowns_usdvnd < RETAIL_MAX_COOLDOWNS_PER_SERIES:
-                    print(f"  >> [USDVND] Nghi ngờ bị giới hạn/chặn API, tạm nghỉ {RETAIL_COOLDOWN_SECONDS}s...")
-                    time.sleep(RETAIL_COOLDOWN_SECONDS)
-                    cooldowns_usdvnd += 1
-                    err_usdvnd = 0
-                else:
-                    print("  >> [USDVND] Vẫn lỗi sau khi đã nghỉ — có vẻ nguồn đang chặn hẳn, "
-                          "bỏ qua chuỗi này cho lần chạy này.")
-                    aborted_usdvnd = True
-
-        if not aborted_gold:
-            try:
-                v = _call_with_timeout(_fetch_gold_point, RETAIL_REQUEST_TIMEOUT_SEC, d)
-                if v is not None:
-                    new_gold[d] = v
-                err_gold = 0
-            except Exception as e:
-                print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({type(e).__name__})")
-                err_gold += 1
-            time.sleep(RETAIL_REQUEST_DELAY)
-
-            if err_gold >= RETAIL_COOLDOWN_AFTER_ERRORS:
-                if cooldowns_gold < RETAIL_MAX_COOLDOWNS_PER_SERIES:
-                    print(f"  >> [GOLD_SJC] Nghi ngờ bị giới hạn/chặn API, tạm nghỉ {RETAIL_COOLDOWN_SECONDS}s...")
-                    time.sleep(RETAIL_COOLDOWN_SECONDS)
-                    cooldowns_gold += 1
-                    err_gold = 0
-                else:
-                    print("  >> [GOLD_SJC] Vẫn lỗi sau khi đã nghỉ — có vẻ nguồn đang chặn hẳn, "
-                          "bỏ qua chuỗi này cho lần chạy này.")
-                    aborted_gold = True
 
     results = {}
 
-    merged_usdvnd = {v[0]: v[1] for v in old_usdvnd}
-    merged_usdvnd.update(new_usdvnd)
-    values_usdvnd = sorted(merged_usdvnd.items())[-MAX_HISTORY_POINTS:]
-    values_usdvnd = [[d, v] for d, v in values_usdvnd]
-    results["USDVND"] = {
-        "label"      : "Tỷ giá USD/VND (Vietcombank, bán ra)",
-        "group"      : "Tỷ giá & Vàng (Việt Nam)",
-        "description": "Tỷ giá bán USD/VND niêm yết tại Vietcombank (qua vnstock)",
-        "freq"       : "daily",
-        "values"     : values_usdvnd,
-    }
-    print(f"  vnstock [USDVND]: {'OK' if not aborted_usdvnd else 'BỎ CUỘC (nguồn chặn IP?)'} "
-          f"({len(new_usdvnd)} điểm mới, {len(values_usdvnd)} điểm tổng)")
+    for key, meta in YFINANCE_SERIES.items():
+        try:
+            hist = yf.Ticker(meta["ticker"]).history(start=START_DATE, interval="1d")
+            if hist is None or hist.empty:
+                print(f"  yfinance [{key}]: không có dữ liệu")
+                continue
 
-    merged_gold = {v[0]: v[1] for v in old_gold}
-    merged_gold.update(new_gold)
-    values_gold = sorted(merged_gold.items())[-MAX_HISTORY_POINTS:]
-    values_gold = [[d, v] for d, v in values_gold]
-    results["GOLD_SJC"] = {
-        "label"      : "Giá vàng SJC (nghìn đồng/lượng, bán ra)",
-        "group"      : "Tỷ giá & Vàng (Việt Nam)",
-        "description": "Giá bán vàng miếng SJC 1 lượng (qua vnstock)",
-        "freq"       : "daily",
-        "values"     : values_gold,
-    }
-    print(f"  vnstock [GOLD_SJC]: {'OK' if not aborted_gold else 'BỎ CUỘC (nguồn chặn IP?)'} "
-          f"({len(new_gold)} điểm mới, {len(values_gold)} điểm tổng)")
+            values = [
+                [d.strftime("%Y-%m-%d"), round(float(v), 4)]
+                for d, v in hist["Close"].items()
+                if pd.notna(v)
+            ]
+            if not values:
+                print(f"  yfinance [{key}]: dữ liệu rỗng sau khi lọc")
+                continue
+
+            results[key] = {
+                "label"      : meta["label"],
+                "group"      : meta["group"],
+                "description": meta["description"],
+                "freq"       : "daily",
+                "values"     : values,
+            }
+            print(f"  yfinance [{key}]: OK ({len(values)} điểm, {values[0][0]} -> {values[-1][0]})")
+
+        except Exception as e:
+            print(f"  yfinance [{key}]: LỖI - {type(e).__name__}: {e}")
 
     return results
+
+
+# ============================================================
+# Dự báo kinh tế của Fed (Summary of Economic Projections - SEP)
+# ============================================================
+FED_PROJECTIONS_SERIES = {
+    "fed_funds_rate": {
+        "id"   : "FEDTARMD",
+        "label": "Dự báo Fed Funds Rate",
+        "unit" : "Percent",
+    },
+    "core_pce": {
+        "id"   : "JCXFEMD",
+        "label": "Dự báo Lạm phát Core PCE",
+        "unit" : "Fourth Quarter to Fourth Quarter Percent Change",
+    },
+}
+
+
+def fetch_fed_projections(api_key):
+    """Lấy dữ liệu "Summary of Economic Projections" (SEP) của Fed — khác hẳn các
+    series FRED thông thường: đây là dữ liệu dự báo công bố lại theo từng đợt họp FOMC
+    (4 lần/năm: 3/6/9/12), mỗi đợt ("vintage") là 1 bộ dự báo riêng cho vài năm tới.
+
+    Dùng get_series_all_releases() của fredapi để lấy TOÀN BỘ lịch sử các lần công bố
+    (trả về cột 'date' = năm được dự báo, 'realtime_start' = ngày công bố đợt đó,
+    'value' = giá trị dự báo), rồi nhóm theo 'realtime_start' để tách từng vintage,
+    chỉ giữ lại FED_PROJECTION_VINTAGES_TO_KEEP vintage gần nhất — giống cách hiển thị
+    nhiều cột màu chồng nhau theo từng đợt công bố (xem ảnh mẫu người dùng cung cấp)."""
+    try:
+        from fredapi import Fred
+    except ImportError:
+        print("  LỖI: Chưa cài fredapi.")
+        return {}
+
+    fred = Fred(api_key=api_key)
+    results = {}
+
+    for key, meta in FED_PROJECTIONS_SERIES.items():
+        try:
+            df = fred.get_series_all_releases(meta["id"])
+            if df is None or df.empty:
+                print(f"  Fed projection [{key}]: không có dữ liệu")
+                continue
+
+            df = df.copy()
+            df["year"] = pd.to_datetime(df["date"]).dt.year
+            df["realtime_start"] = pd.to_datetime(df["realtime_start"])
+
+            all_vintages = sorted(df["realtime_start"].unique(), reverse=True)
+            keep_vintages = sorted(all_vintages[:FED_PROJECTION_VINTAGES_TO_KEEP])  # tăng dần cho dễ đọc
+
+            vintage_list = []
+            for v in keep_vintages:
+                sub = df[df["realtime_start"] == v]
+                data_by_year = {
+                    str(int(row["year"])): round(float(row["value"]), 4)
+                    for _, row in sub.iterrows()
+                    if pd.notna(row["value"])
+                }
+                if data_by_year:
+                    vintage_list.append({
+                        "vintage": pd.Timestamp(v).strftime("%Y-%m-%d"),
+                        "data"   : data_by_year,
+                    })
+
+            if not vintage_list:
+                print(f"  Fed projection [{key}]: không có vintage hợp lệ")
+                continue
+
+            results[key] = {
+                "label"   : meta["label"],
+                "unit"    : meta["unit"],
+                "vintages": vintage_list,
+            }
+            print(f"  Fed projection [{key}]: OK ({len(vintage_list)} vintage: "
+                  f"{', '.join(v['vintage'] for v in vintage_list)})")
+
+        except Exception as e:
+            print(f"  Fed projection [{key}]: LỖI - {type(e).__name__}: {e}")
+
+    return results
+
 
 
 def main():
@@ -570,16 +446,14 @@ def main():
     print("\n[2] World Bank API (Việt Nam)...")
     wb_data = fetch_worldbank()
 
-    print("\n[3] Vietcombank & SJC (Việt Nam, gọi thẳng API công khai)...")
-    if os.environ.get("SKIP_VNSTOCK_RETAIL"):
-        print("  Bỏ qua: biến môi trường SKIP_VNSTOCK_RETAIL đang được bật.")
-        vnstock_data = {}
-    else:
-        existing_series = load_existing_macro()
-        vnstock_data = fetch_vnstock_retail(existing_series)
+    print("\n[3] yfinance (tỷ giá USD/VND + giá vàng thế giới)...")
+    yf_data = fetch_yfinance_retail()
+
+    print("\n[4] Dự báo Fed - Summary of Economic Projections (Mỹ)...")
+    fed_projections = fetch_fed_projections(FRED_API_KEY)
 
     # Gộp lại
-    all_data = {**fred_data, **wb_data, **vnstock_data}
+    all_data = {**fred_data, **wb_data, **yf_data}
 
     if not all_data:
         print("\nCẢNH BÁO: Không lấy được dữ liệu nào — giữ nguyên file cũ nếu có.")
@@ -594,15 +468,17 @@ def main():
         groups[g].append(key)
 
     output = {
-        "updated_at": datetime.now(timezone.utc).astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M"),
-        "groups"    : groups,
-        "series"    : all_data,
+        "updated_at"     : datetime.now(timezone.utc).astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M"),
+        "groups"         : groups,
+        "series"         : all_data,
+        "fed_projections": fed_projections,  # cấu trúc riêng (theo vintage), không nằm trong "series"
     }
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
-    print(f"\nĐã lưu {OUTPUT_FILE} ({len(all_data)} series, {len(groups)} nhóm)")
+    print(f"\nĐã lưu {OUTPUT_FILE} ({len(all_data)} series, {len(groups)} nhóm, "
+          f"{len(fed_projections)} chỉ số dự báo Fed)")
 
 
 if __name__ == "__main__":
