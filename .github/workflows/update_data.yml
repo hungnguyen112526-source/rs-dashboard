@@ -3,13 +3,13 @@ name: Cập nhật dữ liệu RS hàng ngày
 on:
   schedule:
     # 5:00 sáng giờ VN (UTC+7) = 22:00 UTC hôm trước -> chạy T2-T6
-    - cron: "0 22 * * 1-5"
+    - cron: "0 22 * * 0-4"
     # 15:30 chiều giờ VN (UTC+7) = 08:30 UTC -> chạy T2-T6
     - cron: "30 8 * * 1-5"
   workflow_dispatch: {}  # cho phép bấm chạy tay từ tab Actions trên GitHub
 
 jobs:
-  update_data:
+  update-data:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,7 +25,7 @@ jobs:
       - name: Cài thư viện
         run: pip install -r requirements.txt
 
-      - name: Chạy script lấy dữ liệu
+      - name: Chạy script lấy dữ liệu giá cổ phiếu
         env:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
         run: python fetch_data.py
@@ -33,7 +33,10 @@ jobs:
       - name: Chạy script lấy dữ liệu vĩ mô
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
         run: python fetch_macro.py
+        continue-on-error: true  # vĩ mô là phần phụ trợ; nếu FRED/World Bank/vnstock bị lỗi
+                                  # tạm thời thì vẫn không chặn việc cập nhật bảng xếp hạng RS
 
       - name: Sinh báo cáo HTML tĩnh
         run: python generate_report.py
@@ -42,7 +45,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gia_lich_su_rs.csv macro_data.json docs/index.html
+          git add gia_lich_su_rs.csv macro_data.json docs/
           git diff --cached --quiet || git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
           git push
- 
