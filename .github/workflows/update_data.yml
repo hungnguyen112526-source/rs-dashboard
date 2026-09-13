@@ -46,5 +46,28 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add gia_lich_su_rs.csv macro_data.json docs/
-          git diff --cached --quiet || git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
+
+          # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
+          # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại
+          # vài lần thay vì để cả workflow fail ngay lần đầu. Có rebase lại trước mỗi lần
+          # thử để phòng trường hợp có commit khác đã push lên trong lúc này.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1
