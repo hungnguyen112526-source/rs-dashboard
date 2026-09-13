@@ -21,6 +21,7 @@ import os
 import sys
 import json
 import time
+import threading
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
@@ -47,6 +48,46 @@ MAX_HISTORY_POINTS  = 500  # giới hạn số điểm lưu lại cho mỗi seri
 RETAIL_REQUEST_DELAY       = 3
 RETAIL_COOLDOWN_AFTER_ERRORS = 3    # số lỗi (exception) liên tiếp trước khi tạm nghỉ dài
 RETAIL_COOLDOWN_SECONDS      = 65   # nghỉ hơn 1 phút để chờ cửa sổ rate-limit reset
+
+# Bản thân các hàm exchange_rate()/gold() của vnstock KHÔNG đặt timeout cho request HTTP
+# bên trong -> nếu SJC/Vietcombank chặn hoặc làm chậm IP của máy chạy script (rất dễ xảy ra
+# với IP datacenter của GitHub Actions), request có thể treo rất lâu (nhiều phút) thay vì
+# báo lỗi ngay. Ta tự bọc timeout cứng bên ngoài để tránh script bị "treo" hàng chục phút.
+RETAIL_REQUEST_TIMEOUT_SEC = 10
+
+# "Circuit breaker": nếu sau khi đã nghỉ dài (cooldown) mà vẫn tiếp tục lỗi liên tiếp,
+# nghĩa là nguồn đang bị chặn thật sự (không phải rate-limit tạm thời) -> bỏ cuộc luôn
+# cho chuỗi đó trong lần chạy này thay vì cứ lặp lại nghỉ-thử-nghỉ-thử tới hết danh sách
+# ngày, tránh script chạy hàng chục phút một cách vô ích.
+RETAIL_MAX_COOLDOWNS_PER_SERIES = 1
+
+
+def _call_with_timeout(fn, timeout_sec, *args, **kwargs):
+    """Gọi fn(*args, **kwargs) nhưng giới hạn thời gian chờ tối đa timeout_sec giây.
+    Ném TimeoutError nếu quá hạn (dùng cho các hàm vnstock không tự có timeout).
+
+    Dùng threading.Thread(daemon=True) thay vì ThreadPoolExecutor: nếu dùng
+    ThreadPoolExecutor với "with...as" thì lúc thoát khối with sẽ gọi shutdown(wait=True),
+    khiến chương trình VẪN bị treo chờ thread con xong dù đã "timeout" ở future.result() —
+    vô hiệu hoá hoàn toàn mục đích của timeout. Thread daemon=True thì nếu bị treo thật,
+    nó sẽ bị bỏ lại chạy nền và không chặn tiến trình chính thoát."""
+    result = {}
+    error = {}
+
+    def _target():
+        try:
+            result["value"] = fn(*args, **kwargs)
+        except Exception as e:
+            error["exc"] = e
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=timeout_sec)
+    if t.is_alive():
+        raise TimeoutError(f"Vượt quá {timeout_sec}s không phản hồi (có thể nguồn đang chặn/chậm)")
+    if "exc" in error:
+        raise error["exc"]
+    return result.get("value")
 
 # ============================================================
 # Danh sách series FRED cần lấy
@@ -389,37 +430,59 @@ def fetch_vnstock_retail(existing_series):
     new_gold   = {}
     err_usdvnd = 0
     err_gold   = 0
-
-    def _cooldown_if_needed():
-        nonlocal err_usdvnd, err_gold
-        if err_usdvnd >= RETAIL_COOLDOWN_AFTER_ERRORS or err_gold >= RETAIL_COOLDOWN_AFTER_ERRORS:
-            print(f"  >> Nghi ngờ bị giới hạn API (rate limit), tạm nghỉ {RETAIL_COOLDOWN_SECONDS}s...")
-            time.sleep(RETAIL_COOLDOWN_SECONDS)
-            err_usdvnd = 0
-            err_gold = 0
+    cooldowns_usdvnd = 0
+    cooldowns_gold   = 0
+    aborted_usdvnd = False
+    aborted_gold   = False
 
     for d in dates:
-        try:
-            v = _fetch_usdvnd_point(retail, d)
-            if v is not None:
-                new_usdvnd[d] = v
-            err_usdvnd = 0
-        except Exception as e:
-            print(f"  vnstock [USDVND] {d}: bỏ qua ({type(e).__name__})")
-            err_usdvnd += 1
-        time.sleep(RETAIL_REQUEST_DELAY)
-        _cooldown_if_needed()
+        if aborted_usdvnd and aborted_gold:
+            print("  vnstock: cả 2 chuỗi đều đã bỏ cuộc (nguồn có vẻ đang chặn IP này) — dừng sớm.")
+            break
 
-        try:
-            v = _fetch_gold_point(retail, d)
-            if v is not None:
-                new_gold[d] = v
-            err_gold = 0
-        except Exception as e:
-            print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({type(e).__name__})")
-            err_gold += 1
-        time.sleep(RETAIL_REQUEST_DELAY)
-        _cooldown_if_needed()
+        if not aborted_usdvnd:
+            try:
+                v = _call_with_timeout(_fetch_usdvnd_point, RETAIL_REQUEST_TIMEOUT_SEC, retail, d)
+                if v is not None:
+                    new_usdvnd[d] = v
+                err_usdvnd = 0
+            except Exception as e:
+                print(f"  vnstock [USDVND] {d}: bỏ qua ({type(e).__name__})")
+                err_usdvnd += 1
+            time.sleep(RETAIL_REQUEST_DELAY)
+
+            if err_usdvnd >= RETAIL_COOLDOWN_AFTER_ERRORS:
+                if cooldowns_usdvnd < RETAIL_MAX_COOLDOWNS_PER_SERIES:
+                    print(f"  >> [USDVND] Nghi ngờ bị giới hạn/chặn API, tạm nghỉ {RETAIL_COOLDOWN_SECONDS}s...")
+                    time.sleep(RETAIL_COOLDOWN_SECONDS)
+                    cooldowns_usdvnd += 1
+                    err_usdvnd = 0
+                else:
+                    print("  >> [USDVND] Vẫn lỗi sau khi đã nghỉ — có vẻ nguồn đang chặn hẳn, "
+                          "bỏ qua chuỗi này cho lần chạy này.")
+                    aborted_usdvnd = True
+
+        if not aborted_gold:
+            try:
+                v = _call_with_timeout(_fetch_gold_point, RETAIL_REQUEST_TIMEOUT_SEC, retail, d)
+                if v is not None:
+                    new_gold[d] = v
+                err_gold = 0
+            except Exception as e:
+                print(f"  vnstock [GOLD_SJC] {d}: bỏ qua ({type(e).__name__})")
+                err_gold += 1
+            time.sleep(RETAIL_REQUEST_DELAY)
+
+            if err_gold >= RETAIL_COOLDOWN_AFTER_ERRORS:
+                if cooldowns_gold < RETAIL_MAX_COOLDOWNS_PER_SERIES:
+                    print(f"  >> [GOLD_SJC] Nghi ngờ bị giới hạn/chặn API, tạm nghỉ {RETAIL_COOLDOWN_SECONDS}s...")
+                    time.sleep(RETAIL_COOLDOWN_SECONDS)
+                    cooldowns_gold += 1
+                    err_gold = 0
+                else:
+                    print("  >> [GOLD_SJC] Vẫn lỗi sau khi đã nghỉ — có vẻ nguồn đang chặn hẳn, "
+                          "bỏ qua chuỗi này cho lần chạy này.")
+                    aborted_gold = True
 
     results = {}
 
@@ -434,7 +497,8 @@ def fetch_vnstock_retail(existing_series):
         "freq"       : "daily",
         "values"     : values_usdvnd,
     }
-    print(f"  vnstock [USDVND]: OK ({len(new_usdvnd)} điểm mới, {len(values_usdvnd)} điểm tổng)")
+    print(f"  vnstock [USDVND]: {'OK' if not aborted_usdvnd else 'BỎ CUỘC (nguồn chặn IP?)'} "
+          f"({len(new_usdvnd)} điểm mới, {len(values_usdvnd)} điểm tổng)")
 
     merged_gold = {v[0]: v[1] for v in old_gold}
     merged_gold.update(new_gold)
@@ -447,7 +511,8 @@ def fetch_vnstock_retail(existing_series):
         "freq"       : "daily",
         "values"     : values_gold,
     }
-    print(f"  vnstock [GOLD_SJC]: OK ({len(new_gold)} điểm mới, {len(values_gold)} điểm tổng)")
+    print(f"  vnstock [GOLD_SJC]: {'OK' if not aborted_gold else 'BỎ CUỘC (nguồn chặn IP?)'} "
+          f"({len(new_gold)} điểm mới, {len(values_gold)} điểm tổng)")
 
     return results
 
