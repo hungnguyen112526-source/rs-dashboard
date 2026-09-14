@@ -757,20 +757,38 @@ function renderMacroChart(key) {
     rightPriceScale: { borderColor: '#334155' },
   });
 
-  const values = (entry.values || [])
-    .filter(v => v[1] !== null && v[1] !== undefined)
-    .map(v => ({ time: v[0], value: v[1] }));
+  if (entry.ohlc) {
+    // Chỉ số có đủ Open/High/Low/Close (USD/VND, vàng thế giới, dầu Brent qua yfinance) -> vẽ nến
+    const candleData = (entry.values || [])
+      .filter(v => v[1] !== null && v[4] !== null && v[4] !== undefined)
+      .map(v => ({ time: v[0], open: v[1], high: v[2], low: v[3], close: v[4] }));
 
-  if (!values.length) return;
+    if (!candleData.length) return;
 
-  const series = macroChart.addAreaSeries({
-    lineColor: '#60a5fa',
-    topColor: 'rgba(96,165,250,0.25)',
-    bottomColor: 'rgba(96,165,250,0.0)',
-    lineWidth: 2,
-    title: entry.label,
-  });
-  series.setData(values);
+    const candleSeries = macroChart.addCandlestickSeries({
+      upColor: '#22c55e', downColor: '#ef4444',
+      borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+      title: entry.label,
+    });
+    candleSeries.setData(candleData);
+  } else {
+    const values = (entry.values || [])
+      .filter(v => v[1] !== null && v[1] !== undefined)
+      .map(v => ({ time: v[0], value: v[1] }));
+
+    if (!values.length) return;
+
+    const series = macroChart.addAreaSeries({
+      lineColor: '#60a5fa',
+      topColor: 'rgba(96,165,250,0.25)',
+      bottomColor: 'rgba(96,165,250,0.0)',
+      lineWidth: 2,
+      title: entry.label,
+    });
+    series.setData(values);
+  }
+
   macroChart.timeScale().fitContent();
 
   const ro = new ResizeObserver(() => {
