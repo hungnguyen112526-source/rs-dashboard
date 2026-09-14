@@ -283,8 +283,12 @@ def fetch_worldbank():
 
 
 # ============================================================
-# Tỷ giá USD/VND + giá vàng thế giới (qua yfinance)
+# Tỷ giá USD/VND, giá vàng thế giới, giá dầu Brent (qua yfinance)
 # ============================================================
+# Cả 3 chỉ số này lấy đủ OHLC (Open/High/Low/Close) thay vì chỉ giá đóng cửa, để
+# generate_report.py có thể vẽ biểu đồ NẾN (candlestick) thay vì biểu đồ đường —
+# khác với các cặp tiền tệ lấy từ FRED (DXY, EUR/USD...) chỉ có 1 giá trị/ngày nên
+# vẫn phải vẽ dạng đường như cũ, không có đủ dữ liệu để vẽ nến.
 YFINANCE_SERIES = {
     "USDVND": {
         "ticker"     : "VND=X",
@@ -301,11 +305,18 @@ YFINANCE_SERIES = {
         "description": "Giá vàng giao sau (COMEX) thị trường thế giới, đơn vị USD/troy ounce — "
                         "KHÔNG phải giá vàng miếng SJC trong nước (yfinance không có dữ liệu này).",
     },
+    "BRENT_OIL": {
+        "ticker"     : "BZ=F",
+        "label"      : "Giá dầu Brent (USD/thùng)",
+        "group"      : "Tỷ giá & Vàng (Việt Nam)",
+        "description": "Giá dầu thô Brent giao sau (ICE), đơn vị USD/thùng.",
+    },
 }
 
 
 def fetch_yfinance_retail():
-    """Lấy tỷ giá USD/VND và giá vàng thế giới qua yfinance.
+    """Lấy tỷ giá USD/VND, giá vàng thế giới và giá dầu Brent qua yfinance — cả 3 đều
+    lấy đủ OHLC (không chỉ giá đóng cửa) để vẽ được biểu đồ nến.
 
     Khác hẳn cách gọi Vietcombank/SJC trước đây (chỉ trả về giá trị tại 1 ngày cụ thể,
     phải tích luỹ dần qua từng lần chạy + cần circuit breaker vì hay bị chặn IP),
@@ -326,11 +337,22 @@ def fetch_yfinance_retail():
                 print(f"  yfinance [{key}]: không có dữ liệu")
                 continue
 
-            values = [
-                [d.strftime("%Y-%m-%d"), round(float(v), 4)]
-                for d, v in hist["Close"].items()
-                if pd.notna(v)
-            ]
+            ohlc_cols = ["Open", "High", "Low", "Close"]
+            if not all(c in hist.columns for c in ohlc_cols):
+                print(f"  yfinance [{key}]: thiếu cột OHLC, bỏ qua")
+                continue
+
+            values = []
+            for d, row in hist[ohlc_cols].iterrows():
+                if row.isna().any():
+                    continue
+                values.append([
+                    d.strftime("%Y-%m-%d"),
+                    round(float(row["Open"]), 4),
+                    round(float(row["High"]), 4),
+                    round(float(row["Low"]), 4),
+                    round(float(row["Close"]), 4),
+                ])
             if not values:
                 print(f"  yfinance [{key}]: dữ liệu rỗng sau khi lọc")
                 continue
@@ -340,7 +362,8 @@ def fetch_yfinance_retail():
                 "group"      : meta["group"],
                 "description": meta["description"],
                 "freq"       : "daily",
-                "values"     : values,
+                "ohlc"       : True,   # đánh dấu để generate_report.py biết vẽ nến thay vì đường
+                "values"     : values,  # mỗi phần tử: [date, open, high, low, close]
             }
             print(f"  yfinance [{key}]: OK ({len(values)} điểm, {values[0][0]} -> {values[-1][0]})")
 
