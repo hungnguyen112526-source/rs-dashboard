@@ -101,7 +101,29 @@ FRED_SERIES = {
         "label"      : "Lãi suất Fed (%)",
         "group"      : "Lãi suất & Tiền tệ Mỹ",
         "freq"       : "monthly",
-        "description": "Lãi suất quỹ liên bang Mỹ (Federal Funds Rate) — công cụ chính sách tiền tệ của Fed",
+        "description": "Lãi suất quỹ liên bang Mỹ bình quân HIỆU LỰC theo tháng (Effective Federal "
+                        "Funds Rate) — do là số liệu bình quân cả tháng nên FRED công bố trễ khoảng "
+                        "2-3 tuần sau khi tháng kết thúc, KHÔNG phản ánh ngay các quyết định FOMC mới "
+                        "nhất. Xem thêm 2 chỉ số 'Biên trên/dưới mục tiêu Fed' bên dưới để có số liệu "
+                        "sát ngày công bố FOMC hơn.",
+    },
+    "FedTargetUpper": {
+        "id"         : "DFEDTARU",
+        "label"      : "Biên trên mục tiêu Fed (%)",
+        "group"      : "Lãi suất & Tiền tệ Mỹ",
+        "freq"       : "daily",
+        "description": "Biên trên của khoảng lãi suất mục tiêu (Federal Funds Target Range) do FOMC "
+                        "quyết định — cập nhật ngay trong ngày làm việc kế tiếp sau mỗi cuộc họp FOMC, "
+                        "không bị trễ như FEDFUNDS (bình quân tháng).",
+    },
+    "FedTargetLower": {
+        "id"         : "DFEDTARL",
+        "label"      : "Biên dưới mục tiêu Fed (%)",
+        "group"      : "Lãi suất & Tiền tệ Mỹ",
+        "freq"       : "daily",
+        "description": "Biên dưới của khoảng lãi suất mục tiêu (Federal Funds Target Range) do FOMC "
+                        "quyết định — cập nhật ngay trong ngày làm việc kế tiếp sau mỗi cuộc họp FOMC, "
+                        "không bị trễ như FEDFUNDS (bình quân tháng).",
     },
     "US10Y": {
         "id"         : "DGS10",
