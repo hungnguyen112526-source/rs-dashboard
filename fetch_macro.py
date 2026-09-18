@@ -4,12 +4,13 @@ USD/VND + giá vàng thế giới). Lưu kết quả vào macro_data.json để 
 đọc và hiển thị trên dashboard.
 
 Nguồn:
-- FRED API (stlouisfed.org): DXY, 6 cặp tiền, CPI Mỹ, lãi suất Fed, GDP Mỹ, và
-  dự báo SEP (Summary of Economic Projections) của Fed — xem fetch_fed_projections()
+- FRED API (stlouisfed.org): CPI Mỹ, lãi suất Fed, GDP Mỹ, và dự báo SEP (Summary of
+  Economic Projections) của Fed — xem fetch_fed_projections()
 - World Bank API (không cần key): CPI VN, GDP VN, FDI VN, thất nghiệp, XNK, cán cân
   vãng lai, cung tiền M2, sản xuất công nghiệp — theo NĂM
-- yfinance (không cần key): tỷ giá USD/VND (ticker VND=X) và giá vàng thế giới
-  (ticker GC=F, USD/troy ounce) — theo NGÀY.
+- yfinance (không cần key): tỷ giá USD/VND (VND=X), giá vàng thế giới (GC=F), giá dầu
+  Brent (BZ=F), DXY (DX-Y.NYB) và 6 cặp tiền chính (EUR/USD, USD/JPY, GBP/USD, USD/CAD,
+  USD/SEK, USD/CHF) — tất cả theo NGÀY.
 
   Lưu ý quan trọng: trước đây thử lấy tỷ giá niêm yết Vietcombank + giá vàng SJC bằng
   cách gọi thẳng API của các trang này, nhưng IP của GitHub Actions liên tục bị chặn
@@ -19,6 +20,14 @@ Nguồn:
   yfinance cho tải cả 1 khoảng thời gian dài trong 1 lần gọi (khác Vietcombank/SJC chỉ
   cho lấy từng ngày một) nên code ở đây đơn giản hơn nhiều — không cần cơ chế tích luỹ
   dần/circuit breaker phức tạp như bản cũ nữa.
+
+  DXY và 6 cặp tiền (EUR/USD, USD/JPY, GBP/USD, USD/CAD, USD/SEK, USD/CHF) cũng đã
+  chuyển từ FRED (DTWEXBGS/DEXUSEU/...) sang yfinance vì lý do TƯƠNG TỰ: các chuỗi H.10
+  "noon buying rate" của FRED thực tế chỉ được cập nhật vài ngày làm việc một lần, trễ
+  tới 4-6 ngày so với hiện tại — trong khi yfinance cho dữ liệu gần như trong ngày. Đây
+  cũng là dịp sửa luôn một điểm lệch: DTWEXBGS là chỉ số Dollar "Broad" của Fed (rổ hơn
+  20 đồng tiền), không phải chỉ số DXY kinh điển (rổ đúng 6 đồng tiền) như mô tả ban đầu
+  — ticker DX-Y.NYB trên yfinance mới đúng là chỉ số DXY 6-đồng-tiền đó.
 
 Cách dùng:
 - Local : đặt biến môi trường FRED_API_KEY rồi chạy `python fetch_macro.py`
@@ -45,56 +54,9 @@ FED_PROJECTION_VINTAGES_TO_KEEP = 3
 # Danh sách series FRED cần lấy
 # ============================================================
 FRED_SERIES = {
-    # --- Chỉ số Dollar & Tỷ giá ---
-    "DXY": {
-        "id"         : "DTWEXBGS",
-        "label"      : "DXY (Dollar Index)",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Chỉ số sức mạnh đồng Dollar Mỹ so với rổ 6 đồng tiền chính",
-    },
-    "EUR/USD": {
-        "id"         : "DEXUSEU",
-        "label"      : "EUR/USD",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Tỷ giá Euro / Đô la Mỹ (trọng số 57.6% trong DXY)",
-    },
-    "USD/JPY": {
-        "id"         : "DEXJPUS",
-        "label"      : "USD/JPY",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Tỷ giá Đô la Mỹ / Yên Nhật (trọng số 13.6% trong DXY)",
-    },
-    "GBP/USD": {
-        "id"         : "DEXUSUK",
-        "label"      : "GBP/USD",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Tỷ giá Bảng Anh / Đô la Mỹ (trọng số 11.9% trong DXY)",
-    },
-    "USD/CAD": {
-        "id"         : "DEXCAUS",
-        "label"      : "USD/CAD",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Tỷ giá Đô la Mỹ / Đô la Canada (trọng số 9.1% trong DXY)",
-    },
-    "USD/SEK": {
-        "id"         : "DEXSDUS",
-        "label"      : "USD/SEK",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Tỷ giá Đô la Mỹ / Krona Thụy Điển (trọng số 4.2% trong DXY)",
-    },
-    "USD/CHF": {
-        "id"         : "DEXSZUS",
-        "label"      : "USD/CHF",
-        "group"      : "Tỷ giá & Dollar",
-        "freq"       : "daily",
-        "description": "Tỷ giá Đô la Mỹ / Franc Thụy Sĩ (trọng số 3.6% trong DXY)",
-    },
+    # DXY và 6 cặp tiền chính (EUR/USD, USD/JPY, GBP/USD, USD/CAD, USD/SEK, USD/CHF) đã
+    # chuyển sang yfinance (xem YFINANCE_SERIES bên dưới) vì FRED cập nhật các chuỗi này
+    # trễ 4-6 ngày, không sát ngày như dữ liệu daily thật.
     # --- Lãi suất & Tiền tệ Mỹ ---
     "FedFunds": {
         "id"         : "FEDFUNDS",
@@ -312,6 +274,51 @@ def fetch_worldbank():
 # khác với các cặp tiền tệ lấy từ FRED (DXY, EUR/USD...) chỉ có 1 giá trị/ngày nên
 # vẫn phải vẽ dạng đường như cũ, không có đủ dữ liệu để vẽ nến.
 YFINANCE_SERIES = {
+    # --- Chỉ số Dollar & Tỷ giá (trước đây lấy từ FRED, đã chuyển sang yfinance vì
+    # FRED cập nhật trễ 4-6 ngày cho các chuỗi này — xem ghi chú đầu file) ---
+    "DXY": {
+        "ticker"     : "DX-Y.NYB",
+        "label"      : "DXY (Dollar Index)",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Chỉ số sức mạnh đồng Dollar Mỹ so với rổ 6 đồng tiền chính "
+                        "(ICE US Dollar Index, qua yfinance).",
+    },
+    "EUR/USD": {
+        "ticker"     : "EURUSD=X",
+        "label"      : "EUR/USD",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Tỷ giá Euro / Đô la Mỹ (trọng số 57.6% trong DXY), qua yfinance.",
+    },
+    "USD/JPY": {
+        "ticker"     : "JPY=X",
+        "label"      : "USD/JPY",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Tỷ giá Đô la Mỹ / Yên Nhật (trọng số 13.6% trong DXY), qua yfinance.",
+    },
+    "GBP/USD": {
+        "ticker"     : "GBPUSD=X",
+        "label"      : "GBP/USD",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Tỷ giá Bảng Anh / Đô la Mỹ (trọng số 11.9% trong DXY), qua yfinance.",
+    },
+    "USD/CAD": {
+        "ticker"     : "CAD=X",
+        "label"      : "USD/CAD",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Tỷ giá Đô la Mỹ / Đô la Canada (trọng số 9.1% trong DXY), qua yfinance.",
+    },
+    "USD/SEK": {
+        "ticker"     : "SEK=X",
+        "label"      : "USD/SEK",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Tỷ giá Đô la Mỹ / Krona Thụy Điển (trọng số 4.2% trong DXY), qua yfinance.",
+    },
+    "USD/CHF": {
+        "ticker"     : "CHF=X",
+        "label"      : "USD/CHF",
+        "group"      : "Tỷ giá & Dollar",
+        "description": "Tỷ giá Đô la Mỹ / Franc Thụy Sĩ (trọng số 3.6% trong DXY), qua yfinance.",
+    },
     "USDVND": {
         "ticker"     : "VND=X",
         "label"      : "Tỷ giá USD/VND (thị trường quốc tế)",
@@ -491,7 +498,7 @@ def main():
     print("\n[2] World Bank API (Việt Nam)...")
     wb_data = fetch_worldbank()
 
-    print("\n[3] yfinance (tỷ giá USD/VND + giá vàng thế giới)...")
+    print("\n[3] yfinance (DXY, 6 cặp tiền, tỷ giá USD/VND, vàng, dầu Brent)...")
     yf_data = fetch_yfinance_retail()
 
     print("\n[4] Dự báo Fed - Summary of Economic Projections (Mỹ)...")
