@@ -829,8 +829,10 @@ function renderMiniChart(container, key) {
   const entry = MACRO_DATA.series && MACRO_DATA.series[key];
   if (!entry || !container) return;
 
+  const initialWidth = container.getBoundingClientRect().width || container.clientWidth || 260;
+
   const chart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
+    width: initialWidth,
     height: 150,
     layout: { background: { color: 'transparent' }, textColor: '#64748b' },
     grid: { vertLines: { visible: false }, horzLines: { visible: false } },
@@ -880,7 +882,10 @@ function renderMiniChart(container, key) {
 
   chart.timeScale().fitContent();
 
-  const ro = new ResizeObserver(() => chart.applyOptions({ width: container.clientWidth }));
+  const ro = new ResizeObserver(entries => {
+    const w = entries[0].contentRect.width;
+    if (w > 0) chart.applyOptions({ width: w });
+  });
   ro.observe(container);
 }
 
@@ -898,7 +903,11 @@ function initMacroGrid() {
     });
   });
 }
-initMacroGrid();
+// Đợi trình duyệt hoàn tất dàn layout CSS Grid rồi mới đo clientWidth để tạo chart —
+// nếu đo ngay lúc DOM vừa chèn xong, layout Grid có thể chưa ổn định và width đo được
+// bị sai (chart méo/kẹt như 1 khối đặc). Dùng "double requestAnimationFrame" là cách
+// đảm bảo đã qua ít nhất 1 chu kỳ layout+paint đầy đủ.
+requestAnimationFrame(() => requestAnimationFrame(initMacroGrid));
 
 // ---------- Dự báo Fed (Summary of Economic Projections) - biểu đồ cột nhóm theo vintage ----------
 const FED_VINTAGE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#a78bfa', '#f472b6'];
