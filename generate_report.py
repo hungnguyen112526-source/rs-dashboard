@@ -831,12 +831,20 @@ function recentWindow(values, freq) {
   // sẽ bị nén dồn vào 1 góc, trông như đặc/trống. Chỉ lấy 1 khoảng gần đây để mini-card
   // đúng vai trò "xem nhanh xu hướng gần đây"; xem đầy đủ lịch sử ở khung
   // "Xem chi tiết 1 chỉ số" bên dưới (không bị giới hạn này).
-  const n = values.length;
-  let keep;
-  if (freq === 'daily') keep = 260;        // ~1 năm giao dịch gần nhất
-  else if (freq === 'monthly') keep = 36;  // 3 năm gần nhất
-  else keep = n;                           // yearly: giữ nguyên, vốn đã ít điểm
-  return n > keep ? values.slice(n - keep) : values;
+  //
+  // Cắt theo NGÀY LỊCH (không phải đếm số điểm): nếu đếm điểm, một chuỗi đi ngang dài
+  // (như lãi suất Fed đứng yên 9 tháng liền) sẽ khiến toàn bộ cửa sổ rơi đúng vào đoạn
+  // phẳng đó, không thấy được biến động thật trước đó.
+  if (!values.length) return values;
+  const lastDate = new Date(values[values.length - 1][0]);
+  let days;
+  if (freq === 'daily') days = 730;        // ~2 năm gần nhất
+  else if (freq === 'monthly') days = 365 * 5; // 5 năm gần nhất
+  else return values;                      // yearly: giữ nguyên, vốn đã ít điểm
+  const cutoff = new Date(lastDate);
+  cutoff.setDate(cutoff.getDate() - days);
+  const idx = values.findIndex(v => new Date(v[0]) >= cutoff);
+  return idx > 0 ? values.slice(idx) : values;
 }
 
 function renderMiniChart(container, key) {
@@ -900,7 +908,13 @@ function renderMiniChart(container, key) {
 
   const ro = new ResizeObserver(entries => {
     const w = entries[0].contentRect.width;
-    if (w > 0) chart.applyOptions({ width: w });
+    if (w > 0) {
+      chart.applyOptions({ width: w });
+      // Nếu lần đo width lúc khởi tạo bị sai (ô nằm trong CSS Grid, layout chưa ổn
+      // định), phóng khung vẽ to hơn thôi không đủ — phải tính lại vùng thời gian
+      // hiển thị để dữ liệu trải đều hết khung mới, tránh bị "kẹt" dồn về 1 góc.
+      chart.timeScale().fitContent();
+    }
   });
   ro.observe(container);
 }
