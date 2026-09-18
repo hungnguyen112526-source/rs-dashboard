@@ -825,9 +825,25 @@ function computeSMA(points, period) {
   return out;
 }
 
+function recentWindow(values, freq) {
+  // Mini-card chỉ 150px cao nên không đủ chỗ trải cả lịch sử nhiều năm — chuỗi nào có
+  // đoạn đi ngang dài rồi mới biến động mạnh gần đây (vàng, lãi suất Fed, tỷ giá...)
+  // sẽ bị nén dồn vào 1 góc, trông như đặc/trống. Chỉ lấy 1 khoảng gần đây để mini-card
+  // đúng vai trò "xem nhanh xu hướng gần đây"; xem đầy đủ lịch sử ở khung
+  // "Xem chi tiết 1 chỉ số" bên dưới (không bị giới hạn này).
+  const n = values.length;
+  let keep;
+  if (freq === 'daily') keep = 260;        // ~1 năm giao dịch gần nhất
+  else if (freq === 'monthly') keep = 36;  // 3 năm gần nhất
+  else keep = n;                           // yearly: giữ nguyên, vốn đã ít điểm
+  return n > keep ? values.slice(n - keep) : values;
+}
+
 function renderMiniChart(container, key) {
   const entry = MACRO_DATA.series && MACRO_DATA.series[key];
   if (!entry || !container) return;
+
+  const rawValues = recentWindow(entry.values || [], entry.freq);
 
   const initialWidth = container.getBoundingClientRect().width || container.clientWidth || 260;
 
@@ -846,7 +862,7 @@ function renderMiniChart(container, key) {
   let closeValues = [];
 
   if (entry.ohlc) {
-    const candleData = (entry.values || [])
+    const candleData = rawValues
       .filter(v => v[1] !== null && v[4] !== null && v[4] !== undefined)
       .map(v => ({ time: v[0], open: v[1], high: v[2], low: v[3], close: v[4] }));
     if (!candleData.length) return;
@@ -859,7 +875,7 @@ function renderMiniChart(container, key) {
     candleSeries.setData(candleData);
     closeValues = candleData.map(d => ({ time: d.time, value: d.close }));
   } else {
-    const values = (entry.values || [])
+    const values = rawValues
       .filter(v => v[1] !== null && v[1] !== undefined)
       .map(v => ({ time: v[0], value: v[1] }));
     if (!values.length) return;
@@ -1390,7 +1406,7 @@ def main():
         macro_body = f"""
 <div class="card" id="section-macro-grid">
   <div class="section-title">📊 Tổng quan các chỉ số</div>
-  <div class="hint">Bấm vào 1 ô để xem biểu đồ chi tiết bên dưới · Cập nhật lần cuối: {updated}</div>
+  <div class="hint">Mỗi ô hiện xu hướng ~1 năm gần nhất (chuỗi ngày/tháng) · Bấm vào 1 ô để xem đầy đủ lịch sử bên dưới · Cập nhật lần cuối: {updated}</div>
   {grid_html}
 </div>
 
