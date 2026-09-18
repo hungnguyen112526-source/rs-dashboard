@@ -322,6 +322,14 @@ th:first-child { z-index:3; }
 .fed-svg-wrap svg { width:100%; height:auto; display:block; }
 .fed-note { font-size:12px; color: var(--text-mute); margin-top:10px; }
 
+.macro-group-label { font-size:13px; font-weight:700; color: var(--text-dim); margin:18px 0 10px; text-transform:uppercase; letter-spacing:.03em; }
+.macro-group-label:first-child { margin-top:2px; }
+.macro-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:14px; }
+.macro-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px 8px; cursor:pointer; transition: border-color .15s; }
+.macro-card:hover { border-color: var(--accent); }
+.macro-card-title { font-size:13px; font-weight:600; color: var(--text); margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.macro-mini-chart { width:100%; height:150px; }
+
 @media (max-width: 640px) {
   body { padding: 14px; }
   .page-nav { margin: -14px -14px 16px; padding: 10px 14px; }
@@ -331,6 +339,7 @@ th:first-child { z-index:3; }
   .refresh-hint { display:none; }
   th, td { font-size: 13px; padding: 8px 10px; }
   .fed-grid { grid-template-columns: 1fr; }
+  .macro-grid { grid-template-columns: 1fr 1fr; }
 }
 """
 
@@ -805,6 +814,92 @@ function initMacroChart() {
 }
 initMacroChart();
 
+// ---------- Lưới tổng quan các mini-chart (giống dạng "Risk Indicators") ----------
+function computeSMA(points, period) {
+  const out = [];
+  for (let i = period - 1; i < points.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += points[j].value;
+    out.push({ time: points[i].time, value: sum / period });
+  }
+  return out;
+}
+
+function renderMiniChart(container, key) {
+  const entry = MACRO_DATA.series && MACRO_DATA.series[key];
+  if (!entry || !container) return;
+
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 150,
+    layout: { background: { color: 'transparent' }, textColor: '#64748b' },
+    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+    timeScale: { visible: false, borderVisible: false },
+    rightPriceScale: { visible: false, borderVisible: false },
+    crosshair: { horzLine: { visible: false }, vertLine: { visible: false } },
+    handleScroll: false,
+    handleScale: false,
+  });
+
+  let closeValues = [];
+
+  if (entry.ohlc) {
+    const candleData = (entry.values || [])
+      .filter(v => v[1] !== null && v[4] !== null && v[4] !== undefined)
+      .map(v => ({ time: v[0], open: v[1], high: v[2], low: v[3], close: v[4] }));
+    if (!candleData.length) return;
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#22c55e', downColor: '#ef4444',
+      borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    candleSeries.setData(candleData);
+    closeValues = candleData.map(d => ({ time: d.time, value: d.close }));
+  } else {
+    const values = (entry.values || [])
+      .filter(v => v[1] !== null && v[1] !== undefined)
+      .map(v => ({ time: v[0], value: v[1] }));
+    if (!values.length) return;
+    const series = chart.addAreaSeries({
+      lineColor: '#60a5fa', topColor: 'rgba(96,165,250,0.20)', bottomColor: 'rgba(96,165,250,0)',
+      lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+    });
+    series.setData(values);
+    closeValues = values;
+  }
+
+  // Đường trung bình động đỏ (giống ảnh mẫu) — chỉ vẽ khi đủ điểm dữ liệu
+  const maPeriod = entry.freq === 'daily' ? 50 : (entry.freq === 'monthly' ? 6 : 3);
+  if (closeValues.length > maPeriod) {
+    const maSeries = chart.addLineSeries({
+      color: '#f43f5e', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false,
+    });
+    maSeries.setData(computeSMA(closeValues, maPeriod));
+  }
+
+  chart.timeScale().fitContent();
+
+  const ro = new ResizeObserver(() => chart.applyOptions({ width: container.clientWidth }));
+  ro.observe(container);
+}
+
+function initMacroGrid() {
+  document.querySelectorAll('.macro-mini-chart').forEach(el => {
+    renderMiniChart(el, el.dataset.macroKey);
+  });
+  document.querySelectorAll('.macro-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const key = card.dataset.macroKey;
+      const select = document.getElementById('macro-select');
+      if (select) { select.value = key; renderMacroChart(key); }
+      const target = document.getElementById('section-macro');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
+initMacroGrid();
+
 // ---------- Dự báo Fed (Summary of Economic Projections) - biểu đồ cột nhóm theo vintage ----------
 const FED_VINTAGE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#a78bfa', '#f472b6'];
 
@@ -1271,10 +1366,28 @@ def main():
         for _fp in fed_projections.values():
             fed_vintage_count = max(fed_vintage_count, len(_fp.get("vintages", [])))
 
+        grid_html = ""
+        for group_name, keys in groups.items():
+            grid_html += f'<div class="macro-group-label">{group_name}</div><div class="macro-grid">'
+            for key in keys:
+                label = series[key]["label"] if key in series else key
+                grid_html += f"""
+    <div class="macro-card" data-macro-key="{key}">
+      <div class="macro-card-title">{label}</div>
+      <div class="macro-mini-chart" data-macro-key="{key}"></div>
+    </div>"""
+            grid_html += "</div>"
+
         macro_body = f"""
+<div class="card" id="section-macro-grid">
+  <div class="section-title">📊 Tổng quan các chỉ số</div>
+  <div class="hint">Bấm vào 1 ô để xem biểu đồ chi tiết bên dưới · Cập nhật lần cuối: {updated}</div>
+  {grid_html}
+</div>
+
 <div class="card" id="section-macro">
-  <div class="section-title">🌐 Dữ liệu vĩ mô</div>
-  <div class="hint">Nguồn: FRED (Mỹ) · World Bank (VN) · yfinance (tỷ giá USD/VND &amp; vàng thế giới) · Cập nhật lần cuối: {updated}</div>
+  <div class="section-title">🌐 Xem chi tiết 1 chỉ số</div>
+  <div class="hint">Nguồn: FRED (Mỹ) · World Bank (VN) · yfinance (tỷ giá &amp; hàng hoá) · Cập nhật lần cuối: {updated}</div>
   <div class="hint"><span style="color:#60a5fa">—</span> Chọn chỉ số từ dropdown để xem biểu đồ</div>
   <select id="macro-select" class="index-select">{opts_html}</select>
   <div id="macro-chart-container"></div>
