@@ -853,11 +853,8 @@ function renderMiniChart(container, key) {
 
   const rawValues = recentWindow(entry.values || [], entry.freq);
 
-  const initialWidth = container.getBoundingClientRect().width || container.clientWidth || 260;
-
   const chart = LightweightCharts.createChart(container, {
-    width: initialWidth,
-    height: 150,
+    autoSize: true,
     layout: { background: { color: 'transparent' }, textColor: '#64748b' },
     grid: { vertLines: { visible: false }, horzLines: { visible: false } },
     timeScale: { visible: false, borderVisible: false },
@@ -905,18 +902,6 @@ function renderMiniChart(container, key) {
   }
 
   chart.timeScale().fitContent();
-
-  const ro = new ResizeObserver(entries => {
-    const w = entries[0].contentRect.width;
-    if (w > 0) {
-      chart.applyOptions({ width: w });
-      // Nếu lần đo width lúc khởi tạo bị sai (ô nằm trong CSS Grid, layout chưa ổn
-      // định), phóng khung vẽ to hơn thôi không đủ — phải tính lại vùng thời gian
-      // hiển thị để dữ liệu trải đều hết khung mới, tránh bị "kẹt" dồn về 1 góc.
-      chart.timeScale().fitContent();
-    }
-  });
-  ro.observe(container);
 }
 
 function initMacroGrid() {
