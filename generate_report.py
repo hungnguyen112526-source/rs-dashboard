@@ -325,10 +325,11 @@ th:first-child { z-index:3; }
 .macro-group-label { font-size:13px; font-weight:700; color: var(--text-dim); margin:18px 0 10px; text-transform:uppercase; letter-spacing:.03em; }
 .macro-group-label:first-child { margin-top:2px; }
 .macro-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:14px; }
-.macro-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px 8px; cursor:pointer; transition: border-color .15s; }
+.macro-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px 8px; cursor:pointer; transition: border-color .15s; min-width:0; overflow:hidden; }
 .macro-card:hover { border-color: var(--accent); }
 .macro-card-title { font-size:13px; font-weight:600; color: var(--text); margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.macro-mini-chart { width:100%; height:150px; }
+.macro-mini-chart { width:100%; height:150px; min-width:0; overflow:hidden; }
+.macro-mini-chart canvas { max-width:100%; }
 
 @media (max-width: 640px) {
   body { padding: 14px; }
