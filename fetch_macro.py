@@ -111,6 +111,35 @@ FRED_SERIES = {
         "description": "Chi tiêu tiêu dùng cá nhân — thước đo lạm phát Fed ưa thích",
         "transform"  : "yoy_pct",
     },
+    # --- Chỉ báo dẫn dắt (Leading Indicators) ---
+    "YIELD_SPREAD_10Y2Y": {
+        "id"         : "T10Y2Y",
+        "label"      : "Đường cong lợi tức 10Y-2Y (%)",
+        "group"      : "Chỉ báo dẫn dắt",
+        "freq"       : "daily",
+        "description": "Chênh lệch lợi suất TPCP Mỹ kỳ hạn 10 năm và 2 năm. Khi đường cong này ÂM "
+                        "(đảo ngược), thường báo hiệu suy thoái kinh tế sắp xảy ra trong 12-18 tháng "
+                        "tới — đây là 1 trong những chỉ báo dự báo suy thoái được theo dõi nhiều nhất.",
+    },
+    "CONSUMER_SENTIMENT": {
+        "id"         : "UMCSENT",
+        "label"      : "Chỉ số niềm tin tiêu dùng Mỹ (UMich)",
+        "group"      : "Chỉ báo dẫn dắt",
+        "freq"       : "monthly",
+        "description": "Chỉ số niềm tin tiêu dùng của Đại học Michigan — đo lường mức độ lạc quan của "
+                        "người tiêu dùng Mỹ về tình hình tài chính cá nhân và nền kinh tế nói chung. "
+                        "Chỉ số này thường thay đổi TRƯỚC khi nền kinh tế thực sự đổi hướng, nên được "
+                        "coi là chỉ báo dẫn dắt (leading indicator).",
+    },
+    "INFLATION_EXPECTATION": {
+        "id"         : "MICH",
+        "label"      : "Kỳ vọng lạm phát Mỹ (UMich, %)",
+        "group"      : "Chỉ báo dẫn dắt",
+        "freq"       : "monthly",
+        "description": "Kỳ vọng lạm phát trung bình trong 12 tháng tới, theo khảo sát người tiêu dùng "
+                        "của Đại học Michigan. Kỳ vọng lạm phát ảnh hưởng ngược lại tới lạm phát thực "
+                        "tế (vòng xoáy kỳ vọng-giá cả) nên Fed theo dõi rất sát chỉ số này.",
+    },
 }
 
 # ============================================================
