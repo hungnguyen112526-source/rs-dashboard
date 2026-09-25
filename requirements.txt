@@ -2,7 +2,7 @@ streamlit
 pandas
 numpy
 plotly
-vnstock==4.0.5
+vnstock>=4.0.2
 fredapi
 wbgapi
 yfinance
