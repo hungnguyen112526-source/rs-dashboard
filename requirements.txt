@@ -8,7 +8,7 @@ plotly
 # tại https://vnstocks.com/api/simple thay vì PyPI. Vẫn miễn phí, không cần API key.
 --extra-index-url https://vnstocks.com/api/simple
 vnstock==4.0.8
-vnai==2.6.1
+vnai
 fredapi
 wbgapi
 yfinance
