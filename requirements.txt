@@ -2,7 +2,13 @@ streamlit
 pandas
 numpy
 plotly
-vnstock
+# PyPI đang tạm chặn phân phối 2 gói vnstock và vnai (lỗi kiểm duyệt tự động của PyPI,
+# phía vnstocks.com dự kiến khắc phục trong khoảng 1 tuần - thông báo 26/09/2026).
+# Trong lúc chờ, cài trực tiếp từ index riêng của dự án theo đúng hướng dẫn chính thức
+# tại https://vnstocks.com/api/simple thay vì PyPI. Vẫn miễn phí, không cần API key.
+--extra-index-url https://vnstocks.com/api/simple
+vnstock==4.0.8
+vnai==2.6.1
 fredapi
 wbgapi
 yfinance
