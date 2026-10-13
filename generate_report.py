@@ -31,6 +31,15 @@ RANKING_FILE = os.path.join(OUTPUT_DIR, "index.html")
 MONEYFLOW_FILE = os.path.join(OUTPUT_DIR, "moneyflow.html")
 MACRO_HTML_FILE = os.path.join(OUTPUT_DIR, "macro.html")
 MACRO_DATA_FILE = "macro_data.json"
+FINANCIALS_FILE = os.path.join(OUTPUT_DIR, "financials.html")
+FINANCIALS_DATA_FILE = "financials_data.json"
+
+FIN_REPORT_LABELS = {
+    "income_statement": "Kết quả kinh doanh",
+    "balance_sheet": "Cân đối kế toán",
+    "cash_flow": "Lưu chuyển tiền tệ",
+    "ratio": "Chỉ số tài chính",
+}
 
 # Đổi 2 giá trị này đúng theo tài khoản/repo của bạn để nút "Cập nhật ngay" trỏ đúng chỗ
 GITHUB_OWNER = "hungnguyen112526-source"
@@ -383,6 +392,12 @@ th:first-child { z-index:3; }
 .search-box:focus { outline:none; border-color: var(--accent); }
 .table-count { color: var(--text-mute); font-size:12px; white-space:nowrap; }
 
+.fin-table td, .fin-table th { white-space:nowrap; }
+.fin-table td.fin-num { text-align:right; font-variant-numeric: tabular-nums; }
+.fin-table th.fin-num { text-align:right; }
+.fin-table td.fin-period-col, .fin-table th.fin-period-col { position: sticky; left:0; background: var(--card-alt); z-index:2; font-weight:600; }
+.fin-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
+
 .fed-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:14px; }
 .fed-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:14px; }
 .fed-card-title { font-size:14px; font-weight:700; color: var(--text); margin-bottom:10px; }
@@ -434,9 +449,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
-def page_nav_html(active, has_moneyflow, has_macro):
+def page_nav_html(active, has_moneyflow, has_macro, has_financials=False):
     items = [("index.html", "🏆 Xếp hạng", "ranking", True)]
     items.append(("moneyflow.html", "📊 Dòng tiền", "moneyflow", has_moneyflow))
+    items.append(("financials.html", "📑 BCTC", "financials", has_financials))
     items.append(("macro.html", "🌐 Vĩ mô", "macro", has_macro))
     links = ""
     for href, label, key, enabled in items:
@@ -447,8 +463,8 @@ def page_nav_html(active, has_moneyflow, has_macro):
     return f'<nav class="page-nav"><a class="page-nav-top" href="#top" title="Về đầu trang">⬆</a>{links}</nav>'
 
 
-def render_page(page_title, h1, active_nav, has_moneyflow, has_macro, updated_at, body_html, script_js, extra_html=""):
-    nav = page_nav_html(active_nav, has_moneyflow, has_macro)
+def render_page(page_title, h1, active_nav, has_moneyflow, has_macro, updated_at, body_html, script_js, extra_html="", has_financials=False):
+    nav = page_nav_html(active_nav, has_moneyflow, has_macro, has_financials)
     html = PAGE_TEMPLATE
     html = html.replace("%%PAGE_TITLE%%", page_title)
     html = html.replace("%%CSS%%", SHARED_CSS)
@@ -1003,6 +1019,71 @@ window.addEventListener('scroll', () => {
 });
 """
 
+FINANCIALS_SCRIPT = """
+const FIN_DATA = %%FIN_DATA_JSON%%;
+
+let finCurrentTicker = null;
+let finCurrentReport = 'income_statement';
+
+function fmtFinValue(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'number') {
+    // Số nguyên nhỏ (năm, quý, index...) không cần dấu phân cách nghìn - giữ nguyên để
+    // tránh hiện "2.026" thay vì "2026".
+    if (Number.isInteger(v)) return Math.abs(v) >= 10000 ? v.toLocaleString('vi-VN') : String(v);
+    return v.toLocaleString('vi-VN', { maximumFractionDigits: 4 });
+  }
+  return String(v);
+}
+
+function renderFinTable() {
+  const container = document.getElementById('fin-table-container');
+  if (!container) return;
+  const entry = finCurrentTicker ? FIN_DATA[finCurrentTicker] : null;
+  const table = entry ? entry[finCurrentReport] : null;
+  if (!table || !table.columns || !table.columns.length) {
+    container.innerHTML = '<div class="fin-empty">Không có dữ liệu báo cáo này cho mã đã chọn.</div>';
+    return;
+  }
+  let html = '<div class="table-scroll"><table class="fin-table"><tr>';
+  table.columns.forEach((c, i) => {
+    html += '<th class="' + (i === 0 ? 'fin-period-col' : 'fin-num') + '">' + c + '</th>';
+  });
+  html += '</tr>';
+  (table.rows || []).forEach(row => {
+    html += '<tr>';
+    row.forEach((v, i) => {
+      const cls = i === 0 ? 'fin-period-col' : 'fin-num';
+      html += '<td class="' + cls + '">' + fmtFinValue(v) + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</table></div>';
+  container.innerHTML = html;
+}
+
+function switchFinReport(key, btn) {
+  finCurrentReport = key;
+  document.querySelectorAll('.fin-subtab-btn').forEach(b => b.classList.remove('subtab-active'));
+  if (btn) btn.classList.add('subtab-active');
+  renderFinTable();
+}
+
+function initFinSelect() {
+  const select = document.getElementById('fin-ticker-select');
+  if (!select) return;
+  select.addEventListener('change', () => {
+    finCurrentTicker = select.value;
+    renderFinTable();
+  });
+  if (select.options.length) {
+    finCurrentTicker = select.value;
+    renderFinTable();
+  }
+}
+initFinSelect();
+"""
+
 
 # ============================================================================
 # 4. MAIN
@@ -1269,8 +1350,19 @@ def main():
 
     macro_data_json = json.dumps(macro_data, ensure_ascii=False)
 
+    # --- Đọc dữ liệu báo cáo tài chính từ financials_data.json (nếu có) ---
+    financials_data = {}
+    if os.path.exists(FINANCIALS_DATA_FILE):
+        try:
+            with open(FINANCIALS_DATA_FILE, encoding="utf-8") as f:
+                financials_data = json.load(f)
+            print(f"Đã đọc {FINANCIALS_DATA_FILE} ({len(financials_data.get('tickers', {}))} mã)")
+        except Exception as e:
+            print(f"CẢNH BÁO: Không đọc được {FINANCIALS_DATA_FILE}: {e}")
+
     has_moneyflow = bool(index_data)
     has_macro = bool(macro_data.get("series")) if macro_data else False
+    has_financials = bool(financials_data.get("tickers")) if financials_data else False
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -1316,6 +1408,7 @@ def main():
         active_nav="ranking",
         has_moneyflow=has_moneyflow,
         has_macro=has_macro,
+        has_financials=has_financials,
         updated_at=updated_at,
         body_html=ranking_body,
         script_js=ranking_script,
@@ -1357,6 +1450,7 @@ def main():
             active_nav="moneyflow",
             has_moneyflow=has_moneyflow,
             has_macro=has_macro,
+            has_financials=has_financials,
             updated_at=updated_at,
             body_html=moneyflow_body,
             script_js=moneyflow_script,
@@ -1426,6 +1520,7 @@ def main():
             active_nav="macro",
             has_moneyflow=has_moneyflow,
             has_macro=has_macro,
+            has_financials=has_financials,
             updated_at=updated_at,
             body_html=macro_body,
             script_js=macro_script,
@@ -1436,11 +1531,69 @@ def main():
         if os.path.exists(MACRO_HTML_FILE):
             os.remove(MACRO_HTML_FILE)
 
+    # ---------------- TRANG 4: financials.html (Báo cáo tài chính) ----------------
+    if has_financials:
+        fin_tickers = financials_data.get("tickers", {})
+        fin_updated = financials_data.get("updated_at", "")
+        fin_period_label = "quý" if financials_data.get("period", "quarter") == "quarter" else "năm"
+
+        fin_groups = {}
+        for t in fin_tickers.keys():
+            nganh = industry_map.get(t) if t in industry_map.index else None
+            fin_groups.setdefault(nganh if pd.notna(nganh) else "Khác", []).append(t)
+
+        fin_opts_html = ""
+        for group_name in sorted(fin_groups.keys()):
+            fin_opts_html += f'<optgroup label="{group_name}">'
+            for t in sorted(fin_groups[group_name]):
+                fin_opts_html += f'<option value="{t}">{t}</option>'
+            fin_opts_html += "</optgroup>"
+
+        financials_body = f"""
+<div class="card" id="section-financials">
+  <div class="section-title">📑 Báo cáo tài chính</div>
+  <div class="hint">Nguồn: vnstock (VCI) · Theo {fin_period_label} · Cập nhật lần cuối: {fin_updated}</div>
+  <div class="hint">Tên cột lấy theo nguyên dữ liệu gốc từ nguồn cung cấp (KQKD, CĐKT, LCTT, chỉ số).</div>
+  <select id="fin-ticker-select" class="index-select">{fin_opts_html}</select>
+  <div class="subtabs">
+    <button class="fin-subtab-btn subtab-btn subtab-active" onclick="switchFinReport('income_statement', this)">{FIN_REPORT_LABELS['income_statement']}</button>
+    <button class="fin-subtab-btn subtab-btn" onclick="switchFinReport('balance_sheet', this)">{FIN_REPORT_LABELS['balance_sheet']}</button>
+    <button class="fin-subtab-btn subtab-btn" onclick="switchFinReport('cash_flow', this)">{FIN_REPORT_LABELS['cash_flow']}</button>
+    <button class="fin-subtab-btn subtab-btn" onclick="switchFinReport('ratio', this)">{FIN_REPORT_LABELS['ratio']}</button>
+  </div>
+  <div id="fin-table-container"></div>
+</div>
+"""
+        financials_data_json = json.dumps(fin_tickers, ensure_ascii=False)
+        financials_script = FINANCIALS_SCRIPT.replace("%%FIN_DATA_JSON%%", financials_data_json)
+        financials_html_out = render_page(
+            page_title="Báo cáo tài chính — RS Dashboard",
+            h1="📑 Báo cáo tài chính",
+            active_nav="financials",
+            has_moneyflow=has_moneyflow,
+            has_macro=has_macro,
+            has_financials=has_financials,
+            updated_at=updated_at,
+            body_html=financials_body,
+            script_js=financials_script,
+        )
+        with open(FINANCIALS_FILE, "w", encoding="utf-8") as f:
+            f.write(financials_html_out)
+    else:
+        if os.path.exists(FINANCIALS_FILE):
+            os.remove(FINANCIALS_FILE)
+
     chart_kind = "nến+volume" if (has_ohlc and has_volume) else ("nến" if has_ohlc else "đường (thiếu OHLC đầy đủ)")
-    files_created = [RANKING_FILE] + ([MONEYFLOW_FILE] if has_moneyflow else []) + ([MACRO_HTML_FILE] if has_macro else [])
+    files_created = (
+        [RANKING_FILE]
+        + ([MONEYFLOW_FILE] if has_moneyflow else [])
+        + ([FINANCIALS_FILE] if has_financials else [])
+        + ([MACRO_HTML_FILE] if has_macro else [])
+    )
     print(
         f"Đã tạo {len(files_created)} file: {', '.join(files_created)} "
-        f"(kèm biểu đồ {chart_kind}, {len(group_data)} mục ngành/nhóm có popup, {len(index_data)} chỉ số dòng tiền)"
+        f"(kèm biểu đồ {chart_kind}, {len(group_data)} mục ngành/nhóm có popup, {len(index_data)} chỉ số dòng tiền, "
+        f"{len(financials_data.get('tickers', {}))} mã có BCTC)"
     )
 
 
