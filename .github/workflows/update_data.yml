@@ -40,29 +40,18 @@ jobs:
         continue-on-error: true  # vĩ mô là phần phụ trợ; nếu FRED/World Bank/vnstock bị lỗi
                                   # tạm thời thì vẫn không chặn việc cập nhật bảng xếp hạng RS
 
-      - name: Chạy script lấy báo cáo tài chính
-        env:
-          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
-        run: python fetch_financials.py
-        continue-on-error: true  # BCTC là phần phụ trợ, lấy khá nhiều mã (chậm hơn các
-                                  # bước khác) -> lỗi/timeout ở bước này không chặn các
-                                  # phần còn lại của dashboard
-
       - name: Sinh báo cáo HTML tĩnh
         run: python generate_report.py
+        # Lưu ý: BCTC (financials_data.json) KHÔNG được fetch lại ở workflow này nữa —
+        # xem update_financials.yml (chạy riêng, 1 lần/ngày, vì BCTC là dữ liệu theo quý,
+        # không cần lấy lại 3 lần/ngày như giá cổ phiếu). generate_report.py ở đây vẫn đọc
+        # financials_data.json đã có sẵn trong repo (nếu có) để giữ nguyên trang BCTC.
 
       - name: Commit và push file dữ liệu + báo cáo mới
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add gia_lich_su_rs.csv macro_data.json docs/
-          # financials_data.json chỉ được ghi ra nếu fetch_financials.py lấy được ít nhất
-          # 1 mã (xem fetch_financials.py) -> ở lần chạy đầu tiên file này có thể chưa tồn
-          # tại, "git add" một file không tồn tại sẽ làm cả bước này lỗi nên phải kiểm tra
-          # trước khi add.
-          if [ -f financials_data.json ]; then
-            git add financials_data.json
-          fi
 
           if git diff --cached --quiet; then
             echo "Không có gì thay đổi, bỏ qua commit/push."
