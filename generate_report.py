@@ -1481,6 +1481,42 @@ def main():
             fed_vintage_count = max(fed_vintage_count, len(_fp.get("vintages", [])))
 
         macro_body = f"""
+<div class="card" id="section-global-yields">
+  <div class="section-title">🌍 Xu hướng lãi suất toàn cầu (trái phiếu 30 năm)</div>
+  <div class="hint">Widget trực tiếp từ TradingView (dữ liệu TVC) — không qua pipeline tự fetch của dashboard nên luôn là dữ liệu mới nhất. Bấm vào tên mã trên biểu đồ để đổi/thêm quốc gia khác.</div>
+  <div class="tradingview-widget-container" style="height:460px;">
+    <div class="tradingview-widget-container__widget" style="height:100%;width:100%;"></div>
+    <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+    {{
+      "autosize": true,
+      "symbol": "TVC:US30Y",
+      "interval": "W",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "theme": "dark",
+      "style": "2",
+      "locale": "vi_VN",
+      "backgroundColor": "rgba(18, 27, 48, 1)",
+      "gridColor": "rgba(34, 48, 74, 1)",
+      "hide_top_toolbar": false,
+      "hide_legend": false,
+      "allow_symbol_change": true,
+      "compareSymbols": [
+        {{ "symbol": "TVC:JP30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:FR30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:GB30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:DE30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:KR30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:AU30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:NL30Y", "position": "SameScale" }},
+        {{ "symbol": "TVC:CN30Y", "position": "SameScale" }}
+      ],
+      "support_host": "https://www.tradingview.com"
+    }}
+    </script>
+  </div>
+  <div class="hint" style="margin-top:6px;">Nếu 1 mã không hiện (ví dụ Hàn Quốc/Trung Quốc tuỳ nguồn), dùng nút đổi mã ngay trên biểu đồ để tìm lại ký hiệu đúng trên TradingView.</div>
+</div>
+
 <div class="card" id="section-macro">
   <div class="section-title">🌐 Xem chi tiết 1 chỉ số</div>
   <div class="hint">Nguồn: FRED (Mỹ) · World Bank (VN) · yfinance (tỷ giá &amp; hàng hoá) · Cập nhật lần cuối: {updated}</div>
