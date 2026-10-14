@@ -1,0 +1,81 @@
+name: Cập nhật báo cáo tài chính (BCTC)
+
+# Tách riêng khỏi update_data.yml (chạy 3 lần/ngày) vì BCTC là dữ liệu theo QUÝ — không
+# thay đổi trong ngày — nên không cần lấy lại nhiều lần/ngày như giá cổ phiếu. Chạy workflow
+# này 1 lần/ngày là đủ, giúp giảm đáng kể tổng thời gian chạy Actions mỗi ngày.
+
+on:
+  schedule:
+    # 8:00 sáng giờ VN (UTC+7) = 01:00 UTC -> chạy T2-T6. Chạy sau update_data.yml (lịch
+    # 7:00 giờ VN = 00:00 UTC) khoảng 1 tiếng để tránh 2 workflow cùng commit/push 1 lúc.
+    - cron: "0 1 * * 1-5"
+  workflow_dispatch: {}  # cho phép bấm chạy tay từ tab Actions trên GitHub
+
+jobs:
+  update-financials:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Chạy script lấy báo cáo tài chính
+        env:
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: python fetch_financials.py
+        continue-on-error: true  # BCTC là phần phụ trợ; lỗi/timeout ở bước này không nên
+                                  # làm cả workflow fail (vd. nguồn dữ liệu tạm gián đoạn)
+
+      - name: Sinh lại báo cáo HTML tĩnh (cập nhật trang BCTC)
+        run: python generate_report.py
+
+      - name: Commit và push financials_data.json + trang BCTC
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Đồng bộ với nhánh main trước, phòng trường hợp update_data.yml (chạy workflow
+          # khác, cùng push vào main) vừa commit thêm gì đó trước khi workflow này chạy xong.
+          git fetch origin main
+          git rebase origin/main
+
+          git add docs/
+          # financials_data.json chỉ được ghi ra nếu fetch_financials.py lấy được ít nhất
+          # 1 mã (xem fetch_financials.py) -> ở lần chạy đầu tiên file này có thể chưa tồn
+          # tại, "git add" một file không tồn tại sẽ làm cả bước này lỗi nên phải kiểm tra
+          # trước khi add.
+          if [ -f financials_data.json ]; then
+            git add financials_data.json
+          fi
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật báo cáo tài chính (BCTC) tự động $(date +'%Y-%m-%d')"
+
+          # Tự thử lại vài lần nếu push thất bại (lỗi tạm thời phía GitHub, hoặc đụng độ
+          # với commit khác) - rebase lại trước mỗi lần thử.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1
