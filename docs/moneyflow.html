@@ -82,6 +82,18 @@ details.formula-box summary .formula-arrow { display:inline-block; transition:tr
 details.formula-box[open] summary .formula-arrow { transform: rotate(90deg); }
 details.formula-box .formula-list { margin-top:12px; }
 
+.vol-th { cursor:pointer; user-select:none; }
+.vol-th:hover { background:#334155; }
+.vol-full { background:rgba(34,197,94,0.18); color:#4ade80; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+.vol-near { background:rgba(250,204,21,0.15); color:#facc15; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+.vol-neg { color:#f87171; }
+.vol-opts { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:13px; color: var(--text-dim); }
+.vol-opts label { cursor:pointer; display:flex; align-items:center; gap:6px; }
+
+.bond-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin-bottom:6px; font-size:13px; color: var(--text-dim); }
+.bond-legend-item { cursor:pointer; display:flex; align-items:center; gap:5px; }
+.bond-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+
 .table-scroll { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:12px; }
 table { width:100%; min-width:640px; border-collapse: collapse; background: var(--card-alt); border-radius:12px; overflow:hidden; }
 th, td { padding: 10px 12px; text-align:left; border-bottom:1px solid var(--border); font-size: 14px; white-space:nowrap; }
@@ -137,6 +149,17 @@ th:first-child { z-index:3; }
 .fin-table td.fin-period-col, .fin-table th.fin-period-col { position: sticky; left:0; background: var(--card-alt); z-index:2; font-weight:600; }
 .fin-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
 
+.news-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.news-item { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
+.news-title { color: var(--text); font-weight:600; font-size:14.5px; text-decoration:none; line-height:1.4; display:block; }
+.news-title:hover { color:#60a5fa; text-decoration:underline; }
+.news-meta { color: var(--text-mute); font-size:12px; margin-top:7px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.news-source { font-weight:600; color: var(--text-dim); }
+.news-summary { color: var(--text-dim); font-size:13px; margin-top:7px; line-height:1.5; }
+.news-tag { background: var(--border); color:#93c5fd; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
+.news-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
+.news-count { color: var(--text-mute); font-size:12px; margin:4px 0 2px; }
+
 .fed-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:14px; }
 .fed-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:14px; }
 .fed-card-title { font-size:14px; font-weight:700; color: var(--text); margin-bottom:10px; }
@@ -161,12 +184,12 @@ th:first-child { z-index:3; }
 </head>
 <body>
 <div id="top"></div>
-<nav class="page-nav"><a class="page-nav-top" href="#top" title="Về đầu trang">⬆</a><a class="page-nav-item" href="index.html">🏆 Xếp hạng</a><a class="page-nav-item active" href="moneyflow.html">📊 Dòng tiền</a><a class="page-nav-item" href="financials.html">📑 BCTC</a><a class="page-nav-item" href="macro.html">🌐 Vĩ mô</a></nav>
+<nav class="page-nav"><a class="page-nav-top" href="#top" title="Về đầu trang">⬆</a><a class="page-nav-item" href="index.html">🏆 Xếp hạng</a><a class="page-nav-item" href="news.html">📰 Tin tức</a><a class="page-nav-item active" href="moneyflow.html">📊 Dòng tiền</a><a class="page-nav-item" href="volume.html">📉 Lọc KLGD</a><a class="page-nav-item" href="financials.html">📑 BCTC</a><a class="page-nav-item" href="macro.html">🌐 Vĩ mô</a></nav>
 <div class="header-row">
   <h1>📊 Chỉ số dòng tiền</h1>
   <a class="refresh-btn" href="https://github.com/hungnguyen112526-source/rs-dashboard/actions/workflows/update_data.yml" target="_blank" rel="noopener">🔄 Cập nhật dữ liệu &amp; tính lại RS</a>
 </div>
-<div class="updated">Cập nhật lần cuối: 16/10/2026 20:53</div>
+<div class="updated">Cập nhật lần cuối: 18/10/2026 05:10</div>
 <div class="refresh-hint">Nút trên mở trang GitHub Actions — bấm "Run workflow" ở đó để lấy dữ liệu mới nhất và tính lại RS ngay (cần đăng nhập GitHub với quyền chủ repo).</div>
 
 <div class="card" id="section-index">

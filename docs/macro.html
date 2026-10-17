@@ -82,6 +82,18 @@ details.formula-box summary .formula-arrow { display:inline-block; transition:tr
 details.formula-box[open] summary .formula-arrow { transform: rotate(90deg); }
 details.formula-box .formula-list { margin-top:12px; }
 
+.vol-th { cursor:pointer; user-select:none; }
+.vol-th:hover { background:#334155; }
+.vol-full { background:rgba(34,197,94,0.18); color:#4ade80; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+.vol-near { background:rgba(250,204,21,0.15); color:#facc15; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+.vol-neg { color:#f87171; }
+.vol-opts { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:13px; color: var(--text-dim); }
+.vol-opts label { cursor:pointer; display:flex; align-items:center; gap:6px; }
+
+.bond-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin-bottom:6px; font-size:13px; color: var(--text-dim); }
+.bond-legend-item { cursor:pointer; display:flex; align-items:center; gap:5px; }
+.bond-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+
 .table-scroll { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:12px; }
 table { width:100%; min-width:640px; border-collapse: collapse; background: var(--card-alt); border-radius:12px; overflow:hidden; }
 th, td { padding: 10px 12px; text-align:left; border-bottom:1px solid var(--border); font-size: 14px; white-space:nowrap; }
@@ -137,6 +149,17 @@ th:first-child { z-index:3; }
 .fin-table td.fin-period-col, .fin-table th.fin-period-col { position: sticky; left:0; background: var(--card-alt); z-index:2; font-weight:600; }
 .fin-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
 
+.news-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.news-item { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
+.news-title { color: var(--text); font-weight:600; font-size:14.5px; text-decoration:none; line-height:1.4; display:block; }
+.news-title:hover { color:#60a5fa; text-decoration:underline; }
+.news-meta { color: var(--text-mute); font-size:12px; margin-top:7px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.news-source { font-weight:600; color: var(--text-dim); }
+.news-summary { color: var(--text-dim); font-size:13px; margin-top:7px; line-height:1.5; }
+.news-tag { background: var(--border); color:#93c5fd; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
+.news-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
+.news-count { color: var(--text-mute); font-size:12px; margin:4px 0 2px; }
+
 .fed-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:14px; }
 .fed-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:14px; }
 .fed-card-title { font-size:14px; font-weight:700; color: var(--text); margin-bottom:10px; }
@@ -161,48 +184,17 @@ th:first-child { z-index:3; }
 </head>
 <body>
 <div id="top"></div>
-<nav class="page-nav"><a class="page-nav-top" href="#top" title="Về đầu trang">⬆</a><a class="page-nav-item" href="index.html">🏆 Xếp hạng</a><a class="page-nav-item" href="moneyflow.html">📊 Dòng tiền</a><a class="page-nav-item" href="financials.html">📑 BCTC</a><a class="page-nav-item active" href="macro.html">🌐 Vĩ mô</a></nav>
+<nav class="page-nav"><a class="page-nav-top" href="#top" title="Về đầu trang">⬆</a><a class="page-nav-item" href="index.html">🏆 Xếp hạng</a><a class="page-nav-item" href="news.html">📰 Tin tức</a><a class="page-nav-item" href="moneyflow.html">📊 Dòng tiền</a><a class="page-nav-item" href="volume.html">📉 Lọc KLGD</a><a class="page-nav-item" href="financials.html">📑 BCTC</a><a class="page-nav-item active" href="macro.html">🌐 Vĩ mô</a></nav>
 <div class="header-row">
   <h1>🌐 Dữ liệu vĩ mô</h1>
   <a class="refresh-btn" href="https://github.com/hungnguyen112526-source/rs-dashboard/actions/workflows/update_data.yml" target="_blank" rel="noopener">🔄 Cập nhật dữ liệu &amp; tính lại RS</a>
 </div>
-<div class="updated">Cập nhật lần cuối: 16/10/2026 20:53</div>
+<div class="updated">Cập nhật lần cuối: 18/10/2026 05:10</div>
 <div class="refresh-hint">Nút trên mở trang GitHub Actions — bấm "Run workflow" ở đó để lấy dữ liệu mới nhất và tính lại RS ngay (cần đăng nhập GitHub với quyền chủ repo).</div>
 
 <div class="card" id="section-global-yields">
   <div class="section-title">🌍 Xu hướng lãi suất toàn cầu (trái phiếu 30 năm)</div>
-  <div class="hint">Widget trực tiếp từ TradingView (dữ liệu TVC) — không qua pipeline tự fetch của dashboard nên luôn là dữ liệu mới nhất. Bấm vào tên mã trên biểu đồ để đổi/thêm quốc gia khác.</div>
-  <div class="tradingview-widget-container" style="height:460px;">
-    <div class="tradingview-widget-container__widget" style="height:100%;width:100%;"></div>
-    <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-    {
-      "autosize": true,
-      "symbol": "TVC:US30Y",
-      "interval": "W",
-      "timezone": "Asia/Ho_Chi_Minh",
-      "theme": "dark",
-      "style": "2",
-      "locale": "vi_VN",
-      "backgroundColor": "rgba(18, 27, 48, 1)",
-      "gridColor": "rgba(34, 48, 74, 1)",
-      "hide_top_toolbar": false,
-      "hide_legend": false,
-      "allow_symbol_change": true,
-      "compareSymbols": [
-        { "symbol": "TVC:JP30Y", "position": "SameScale" },
-        { "symbol": "TVC:FR30Y", "position": "SameScale" },
-        { "symbol": "TVC:GB30Y", "position": "SameScale" },
-        { "symbol": "TVC:DE30Y", "position": "SameScale" },
-        { "symbol": "TVC:KR30Y", "position": "SameScale" },
-        { "symbol": "TVC:AU30Y", "position": "SameScale" },
-        { "symbol": "TVC:NL30Y", "position": "SameScale" },
-        { "symbol": "TVC:CN30Y", "position": "SameScale" }
-      ],
-      "support_host": "https://www.tradingview.com"
-    }
-    </script>
-  </div>
-  <div class="hint" style="margin-top:6px;">Nếu 1 mã không hiện (ví dụ Hàn Quốc/Trung Quốc tuỳ nguồn), dùng nút đổi mã ngay trên biểu đồ để tìm lại ký hiệu đúng trên TradingView.</div>
+  <div class="hint">Chưa có dữ liệu (bond_yields.json). Chạy workflow cập nhật dữ liệu để lấy từ TradingView.</div>
 </div>
 
 <div class="card" id="section-macro">
