@@ -40,6 +40,11 @@ jobs:
         continue-on-error: true  # vĩ mô là phần phụ trợ; nếu FRED/World Bank/vnstock bị lỗi
                                   # tạm thời thì vẫn không chặn việc cập nhật bảng xếp hạng RS
 
+      - name: Lấy lãi suất trái phiếu 30 năm toàn cầu (TradingView)
+        run: python fetch_bond_yields.py
+        continue-on-error: true  # phần phụ trợ; tvdatafeed là thư viện không chính thức,
+                                  # lỗi tạm thời không nên chặn cập nhật bảng xếp hạng RS
+
       - name: Sinh báo cáo HTML tĩnh
         run: python generate_report.py
         # Lưu ý: BCTC (financials_data.json) KHÔNG được fetch lại ở workflow này nữa —
@@ -52,6 +57,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add gia_lich_su_rs.csv macro_data.json docs/
+          if [ -f bond_yields.json ]; then git add bond_yields.json; fi
 
           if git diff --cached --quiet; then
             echo "Không có gì thay đổi, bỏ qua commit/push."
