@@ -1,0 +1,71 @@
+name: Cập nhật tin tức tổng hợp
+
+# Chạy riêng, dày hơn các workflow khác (mỗi 2 tiếng) vì tin tức cần mới liên tục trong ngày.
+# Chỉ đọc RSS công khai (CafeF, Vietstock, Investing.com) -> không cần API key, mỗi lần chạy
+# chỉ vài chục giây.
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"   # mỗi 2 tiếng (giờ UTC), cả ngày, cả cuối tuần
+  workflow_dispatch: {}
+
+concurrency:
+  group: update-news
+  cancel-in-progress: false
+
+jobs:
+  update-news:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install pandas numpy feedparser
+
+      - name: Lấy tin tức từ RSS
+        run: python fetch_news.py
+        continue-on-error: true  # 1 nguồn lỗi không nên làm hỏng cả workflow
+
+      - name: Sinh lại báo cáo HTML tĩnh
+        run: python generate_report.py
+
+      - name: Commit và push tin tức + trang news
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main || git rebase --abort
+
+          git add docs/
+          if [ -f news_data.json ]; then
+            git add news_data.json
+          fi
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật tin tức tự động $(date +'%Y-%m-%d %H:%M')"
+
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1
