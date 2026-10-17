@@ -41,8 +41,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git rebase origin/main || git rebase --abort
 
           git add docs/
           if [ -f news_data.json ]; then
@@ -63,8 +61,9 @@ jobs:
             fi
             echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
             sleep $((i * 15))
+            # Lưu ý: khi rebase, "theirs" = commit của workflow này -> ưu tiên bản HTML/JSON vừa sinh
             git fetch origin main
-            git rebase origin/main
+            git rebase -X theirs origin/main || { git rebase --abort; }
           done
 
           echo "::error::Push thất bại sau 5 lần thử."
