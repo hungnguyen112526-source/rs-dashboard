@@ -31,8 +31,13 @@ RANKING_FILE = os.path.join(OUTPUT_DIR, "index.html")
 MONEYFLOW_FILE = os.path.join(OUTPUT_DIR, "moneyflow.html")
 MACRO_HTML_FILE = os.path.join(OUTPUT_DIR, "macro.html")
 MACRO_DATA_FILE = "macro_data.json"
+BOND_DATA_FILE = "bond_yields.json"
 FINANCIALS_FILE = os.path.join(OUTPUT_DIR, "financials.html")
 FINANCIALS_DATA_FILE = "financials_data.json"
+NEWS_FILE = os.path.join(OUTPUT_DIR, "news.html")
+VOLUME_FILE = os.path.join(OUTPUT_DIR, "volume.html")
+HAS_VOLUME_PAGE = False  # được bật trong main() nếu có cột volume
+NEWS_DATA_FILE = "news_data.json"
 
 FIN_REPORT_LABELS = {
     "income_statement": "Kết quả kinh doanh",
@@ -263,6 +268,90 @@ def resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
     return weekly
 
 
+VOL_WINDOWS = [5, 10, 20, 40]
+VOL_MIN_NEAR_TIERS = 3
+VN_TZ_VOL = timezone(timedelta(hours=7))
+
+
+def _vol_chain_tiers(v):
+    """v: mảng KLGD (cũ -> mới). Trả về (ma5, ma10, ma20, ma40, số mốc đạt) hoặc None nếu thiếu dữ liệu.
+    Số mốc đạt = độ dài chuỗi giảm dần liên tiếp tính từ TB5: TB5<TB10 (2 mốc), <TB20 (3 mốc), <TB40 (4 mốc);
+    1 = không đạt cả TB5<TB10."""
+    if len(v) < VOL_WINDOWS[-1]:
+        return None
+    mas = [float(np.mean(v[-w:])) for w in VOL_WINDOWS]
+    tiers = 1
+    for i in range(3):
+        if mas[i] < mas[i + 1]:
+            tiers += 1
+        else:
+            break
+    return mas, tiers
+
+
+def compute_volume_screen(df, rs_map, industry_map, now_vn=None):
+    """Lọc mã có KLGD giảm dần: TB5 < TB10 < TB20 < TB40 (phiên với khung ngày, tuần với khung tuần).
+    Loại phiên/tuần CHƯA KẾT THÚC khỏi tính toán (KLGD trong phiên chưa đủ). Không lọc thanh khoản;
+    GTGD TB20 chỉ để tham khảo. Trả về dict hoặc None nếu thiếu cột volume."""
+    if "volume" not in df.columns:
+        return None
+    now_vn = now_vn or datetime.now(VN_TZ_VOL)
+    today = now_vn.date()
+    session_open = now_vn.hour < 15
+    base = df[["date", "ticker", "close", "volume"]].dropna(subset=["volume"]).sort_values(["ticker", "date"])
+    if base.empty:
+        return None
+
+    out = {"day": [], "week": [], "last_day": None, "last_week": None}
+    last_days, last_weeks = [], []
+    for ticker, g in base.groupby("ticker"):
+        g = g.reset_index(drop=True)
+        # --- bỏ phiên chưa kết thúc (hôm nay, trước 15:00 giờ VN) ---
+        if g["date"].iloc[-1].date() == today and session_open:
+            g = g.iloc[:-1]
+        if g.empty:
+            continue
+        last_days.append(g["date"].iloc[-1])
+        vol = g["volume"].astype(float).values
+        gtgd = float(np.mean(g["close"].astype(float).values[-20:] * 1000.0 * vol[-20:])) / 1e9 if len(g) >= 20 else None
+        ind = industry_map.get(ticker, "")
+        rs = rs_map.get(ticker)
+        rs = int(rs) if rs is not None and not pd.isna(rs) else None
+
+        def add(frame, res):
+            if res is None:
+                return
+            mas, tiers = res
+            if tiers < VOL_MIN_NEAR_TIERS:
+                return
+            out[frame].append({
+                "t": ticker, "i": ind if isinstance(ind, str) else "",
+                "m": [round(x, 0) for x in mas],
+                "p": round((mas[0] / mas[3] - 1) * 100, 1) if mas[3] else None,
+                "n": tiers,
+                "g": round(gtgd, 2) if gtgd is not None else None,
+                "r": rs,
+            })
+
+        add("day", _vol_chain_tiers(vol))
+
+        # --- khung tuần: tổng KLGD mỗi tuần (kết thúc thứ Sáu); bỏ tuần chưa kết thúc ---
+        wk = g.set_index("date")["volume"].astype(float).resample("W-FRI").sum(min_count=1).dropna()
+        if len(wk):
+            wk_end = wk.index[-1].date()
+            if wk_end > today or (wk_end == today and session_open):
+                wk = wk.iloc[:-1]
+        if len(wk):
+            last_weeks.append(wk.index[-1])
+            add("week", _vol_chain_tiers(wk.values))
+
+    if last_days:
+        out["last_day"] = max(last_days).strftime("%d/%m/%Y")
+    if last_weeks:
+        out["last_week"] = max(last_weeks).strftime("%d/%m/%Y")
+    return out
+
+
 # ============================================================================
 # 2. GIAO DIỆN DÙNG CHUNG (theme, nav, khung trang)
 # ============================================================================
@@ -343,6 +432,18 @@ details.formula-box summary .formula-arrow { display:inline-block; transition:tr
 details.formula-box[open] summary .formula-arrow { transform: rotate(90deg); }
 details.formula-box .formula-list { margin-top:12px; }
 
+.vol-th { cursor:pointer; user-select:none; }
+.vol-th:hover { background:#334155; }
+.vol-full { background:rgba(34,197,94,0.18); color:#4ade80; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+.vol-near { background:rgba(250,204,21,0.15); color:#facc15; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+.vol-neg { color:#f87171; }
+.vol-opts { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:13px; color: var(--text-dim); }
+.vol-opts label { cursor:pointer; display:flex; align-items:center; gap:6px; }
+
+.bond-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin-bottom:6px; font-size:13px; color: var(--text-dim); }
+.bond-legend-item { cursor:pointer; display:flex; align-items:center; gap:5px; }
+.bond-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+
 .table-scroll { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:12px; }
 table { width:100%; min-width:640px; border-collapse: collapse; background: var(--card-alt); border-radius:12px; overflow:hidden; }
 th, td { padding: 10px 12px; text-align:left; border-bottom:1px solid var(--border); font-size: 14px; white-space:nowrap; }
@@ -398,6 +499,17 @@ th:first-child { z-index:3; }
 .fin-table td.fin-period-col, .fin-table th.fin-period-col { position: sticky; left:0; background: var(--card-alt); z-index:2; font-weight:600; }
 .fin-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
 
+.news-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.news-item { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
+.news-title { color: var(--text); font-weight:600; font-size:14.5px; text-decoration:none; line-height:1.4; display:block; }
+.news-title:hover { color:#60a5fa; text-decoration:underline; }
+.news-meta { color: var(--text-mute); font-size:12px; margin-top:7px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.news-source { font-weight:600; color: var(--text-dim); }
+.news-summary { color: var(--text-dim); font-size:13px; margin-top:7px; line-height:1.5; }
+.news-tag { background: var(--border); color:#93c5fd; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
+.news-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
+.news-count { color: var(--text-mute); font-size:12px; margin:4px 0 2px; }
+
 .fed-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:14px; }
 .fed-card { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:14px; }
 .fed-card-title { font-size:14px; font-weight:700; color: var(--text); margin-bottom:10px; }
@@ -449,9 +561,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
-def page_nav_html(active, has_moneyflow, has_macro, has_financials=False):
+def page_nav_html(active, has_moneyflow, has_macro, has_financials=False, has_news=False):
     items = [("index.html", "🏆 Xếp hạng", "ranking", True)]
+    items.append(("news.html", "📰 Tin tức", "news", has_news))
     items.append(("moneyflow.html", "📊 Dòng tiền", "moneyflow", has_moneyflow))
+    items.append(("volume.html", "📉 Lọc KLGD", "volume", HAS_VOLUME_PAGE))
     items.append(("financials.html", "📑 BCTC", "financials", has_financials))
     items.append(("macro.html", "🌐 Vĩ mô", "macro", has_macro))
     links = ""
@@ -463,8 +577,8 @@ def page_nav_html(active, has_moneyflow, has_macro, has_financials=False):
     return f'<nav class="page-nav"><a class="page-nav-top" href="#top" title="Về đầu trang">⬆</a>{links}</nav>'
 
 
-def render_page(page_title, h1, active_nav, has_moneyflow, has_macro, updated_at, body_html, script_js, extra_html="", has_financials=False):
-    nav = page_nav_html(active_nav, has_moneyflow, has_macro, has_financials)
+def render_page(page_title, h1, active_nav, has_moneyflow, has_macro, updated_at, body_html, script_js, extra_html="", has_financials=False, has_news=False):
+    nav = page_nav_html(active_nav, has_moneyflow, has_macro, has_financials, has_news)
     html = PAGE_TEMPLATE
     html = html.replace("%%PAGE_TITLE%%", page_title)
     html = html.replace("%%CSS%%", SHARED_CSS)
@@ -1084,6 +1198,235 @@ function initFinSelect() {
 initFinSelect();
 """
 
+NEWS_SCRIPT = """
+const NEWS_DATA = %%NEWS_DATA_JSON%%;
+
+let newsCurrentCategory = 'all';
+let newsSearchTerm = '';
+
+function escapeNewsHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s == null ? '' : String(s);
+  return div.innerHTML;
+}
+
+function newsMatchesSearch(article, term) {
+  if (!term) return true;
+  const hay = (article.title + ' ' + (article.summary || '') + ' ' + (article.tickers || []).join(' ')).toLowerCase();
+  return hay.includes(term);
+}
+
+function renderNewsList() {
+  const container = document.getElementById('news-list-container');
+  const countEl = document.getElementById('news-count');
+  if (!container) return;
+
+  const term = newsSearchTerm.trim().toLowerCase();
+  const filtered = (NEWS_DATA.articles || []).filter(a => {
+    if (newsCurrentCategory !== 'all' && a.category !== newsCurrentCategory) return false;
+    return newsMatchesSearch(a, term);
+  });
+
+  if (countEl) countEl.textContent = filtered.length + ' bài';
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="news-empty">Không có bài nào khớp bộ lọc hiện tại.</div>';
+    return;
+  }
+
+  let html = '<div class="news-list">';
+  filtered.forEach(a => {
+    const tags = (a.tickers || []).map(t => '<span class="news-tag">' + escapeNewsHtml(t) + '</span>').join(' ');
+    html += '<div class="news-item">';
+    html += '<a class="news-title" href="' + escapeNewsHtml(a.link) + '" target="_blank" rel="noopener noreferrer">' + escapeNewsHtml(a.title) + '</a>';
+    html += '<div class="news-meta">';
+    html += '<span class="news-source">' + escapeNewsHtml(a.source) + '</span>';
+    html += '<span>· ' + escapeNewsHtml(a.category) + '</span>';
+    if (a.published_at) html += '<span>· ' + escapeNewsHtml(a.published_at) + '</span>';
+    if (tags) html += '<span>· ' + tags + '</span>';
+    html += '</div>';
+    if (a.summary) html += '<div class="news-summary">' + escapeNewsHtml(a.summary) + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function switchNewsCategory(key, btn) {
+  newsCurrentCategory = key;
+  document.querySelectorAll('.news-subtab-btn').forEach(b => b.classList.remove('subtab-active'));
+  if (btn) btn.classList.add('subtab-active');
+  renderNewsList();
+}
+
+function initNewsFilter() {
+  const searchBox = document.getElementById('news-search');
+  if (searchBox) {
+    searchBox.addEventListener('input', () => {
+      newsSearchTerm = searchBox.value;
+      renderNewsList();
+    });
+  }
+  renderNewsList();
+}
+initNewsFilter();
+"""
+
+
+VOLUME_SCRIPT = """
+const VOL_DATA = %%VOL_DATA_JSON%%;
+const CHART_DATA = %%CHART_DATA_JSON%%;
+const HAS_OHLC = %%HAS_OHLC_JSON%%;
+const HAS_VOLUME = %%HAS_VOLUME_JSON%%;
+let currentChartState = null;
+
+%%CHART_HELPERS%%
+
+let volFrame = 'day';
+let volShowNear = false;
+let volSearch = '';
+let volSortKey = 'p';
+let volSortDir = 1;
+
+function fmtVol(x) { return x == null ? '-' : Math.round(x).toLocaleString('vi-VN'); }
+function escVol(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+function volSortValue(r, key) {
+  if (key === 't') return r.t;
+  if (key === 'i') return r.i || '';
+  if (key === 'p') return r.p == null ? Infinity : r.p;
+  if (key === 'n') return r.n;
+  if (key === 'g') return r.g == null ? -Infinity : r.g;
+  if (key === 'r') return r.r == null ? -Infinity : r.r;
+  if (key.startsWith('m')) return r.m[parseInt(key.slice(1), 10)];
+  return 0;
+}
+
+function renderVolume() {
+  const rows = (VOL_DATA[volFrame] || []).filter(r => (volShowNear || r.n >= 4)
+    && (!volSearch || (r.t + ' ' + (r.i || '')).toLowerCase().includes(volSearch)));
+  rows.sort((a, b) => {
+    const x = volSortValue(a, volSortKey), y = volSortValue(b, volSortKey);
+    if (x < y) return -volSortDir;
+    if (x > y) return volSortDir;
+    return a.t < b.t ? -1 : 1;
+  });
+  const unit = volFrame === 'day' ? 'phiên' : 'tuần';
+  const cols = [['t','Mã'],['i','Ngành'],['m0','TB5'],['m1','TB10'],['m2','TB20'],['m3','TB40'],
+                ['p','% TB5 so với TB40'],['n','Số mốc đạt'],['g','GTGD TB20 (tỷ)'],['r','RS']];
+  let h = '<div class="table-scroll"><table class="vol-table"><tr>';
+  for (const [k, label] of cols) {
+    const arrow = k === volSortKey ? (volSortDir === 1 ? ' ▲' : ' ▼') : '';
+    h += '<th class="vol-th" onclick="volSort(\\'' + k + '\\')">' + label + arrow + '</th>';
+  }
+  h += '</tr>';
+  for (const r of rows) {
+    const tag = r.n >= 4 ? '<span class="vol-full">4/4</span>' : '<span class="vol-near">' + r.n + '/4</span>';
+    h += '<tr class="stock-row" onclick="showChart(\\'' + r.t + '\\')">'
+      + '<td class="ticker-cell">' + escVol(r.t) + '</td>'
+      + '<td>' + escVol(r.i) + '</td>'
+      + '<td>' + fmtVol(r.m[0]) + '</td><td>' + fmtVol(r.m[1]) + '</td>'
+      + '<td>' + fmtVol(r.m[2]) + '</td><td>' + fmtVol(r.m[3]) + '</td>'
+      + '<td class="vol-neg">' + (r.p == null ? '-' : r.p.toFixed(1) + '%') + '</td>'
+      + '<td>' + tag + '</td>'
+      + '<td>' + (r.g == null ? '-' : r.g.toLocaleString('vi-VN', {maximumFractionDigits: 1})) + '</td>'
+      + '<td>' + (r.r == null ? '-' : r.r) + '</td></tr>';
+  }
+  h += '</table></div>';
+  if (!rows.length) h = '<div class="hint">Không có mã nào thỏa điều kiện.</div>';
+  document.getElementById('vol-table-container').innerHTML = h;
+  document.getElementById('vol-count').textContent = rows.length + ' mã';
+  const last = volFrame === 'day' ? VOL_DATA.last_day : VOL_DATA.last_week;
+  document.getElementById('vol-asof').textContent = last
+    ? ('Tính đến ' + unit + ' kết thúc ngày ' + last + ' (không tính ' + unit + ' đang diễn ra).') : '';
+}
+
+function volSort(k) {
+  if (volSortKey === k) volSortDir = -volSortDir; else { volSortKey = k; volSortDir = (k === 't' || k === 'i' || k === 'p') ? 1 : -1; }
+  renderVolume();
+}
+
+function setVolFrame(f, btn) {
+  volFrame = f;
+  document.querySelectorAll('.vol-frame-btn').forEach(b => b.classList.remove('tf-toggle-active'));
+  btn.classList.add('tf-toggle-active');
+  renderVolume();
+}
+
+document.getElementById('vol-near').addEventListener('change', e => { volShowNear = e.target.checked; renderVolume(); });
+document.getElementById('vol-search').addEventListener('input', e => { volSearch = e.target.value.trim().toLowerCase(); renderVolume(); });
+renderVolume();
+"""
+
+
+BOND_COLORS = ["#60a5fa", "#f87171", "#34d399", "#fbbf24", "#a78bfa", "#f472b6", "#22d3ee", "#fb923c", "#94a3b8"]
+
+BOND_SCRIPT = """
+(function() {
+  const BOND = %%BOND_JSON%%;
+  const COLORS = %%BOND_COLORS%%;
+  const box = document.getElementById('bond-chart');
+  if (!box || typeof LightweightCharts === 'undefined') return;
+  const chart = LightweightCharts.createChart(box, {
+    width: box.clientWidth, height: 420,
+    layout: { background: { color: '#121b30' }, textColor: '#cbd5e1' },
+    grid: { vertLines: { color: '#22304a' }, horzLines: { color: '#22304a' } },
+    timeScale: { borderColor: '#334155' },
+    rightPriceScale: { borderColor: '#334155' },
+    crosshair: { mode: 0 },
+  });
+  const legend = document.getElementById('bond-legend');
+  const info = document.getElementById('bond-info');
+  const lines = {};
+  Object.keys(BOND).forEach((code, i) => {
+    const color = COLORS[i % COLORS.length];
+    const s = chart.addLineSeries({ color, lineWidth: 2, priceFormat: { type: 'custom', formatter: v => v.toFixed(2) + '%' } });
+    s.setData(BOND[code].data.map(d => ({ time: d[0], value: d[1] })));
+    lines[code] = s;
+    const last = BOND[code].data[BOND[code].data.length - 1];
+    const lab = document.createElement('label');
+    lab.className = 'bond-legend-item';
+    lab.innerHTML = '<input type="checkbox" checked> <span class="bond-dot" style="background:' + color + '"></span>' +
+      BOND[code].label + ' <b>' + last[1].toFixed(2) + '%</b>';
+    lab.querySelector('input').addEventListener('change', e => s.applyOptions({ visible: e.target.checked }));
+    legend.appendChild(lab);
+  });
+  chart.timeScale().fitContent();
+  chart.subscribeCrosshairMove(p => {
+    if (!p.time) { info.textContent = ''; return; }
+    const parts = [];
+    Object.keys(lines).forEach(code => {
+      const v = p.seriesData.get(lines[code]);
+      if (v) parts.push(BOND[code].label + ' ' + v.value.toFixed(2) + '%');
+    });
+    info.textContent = (typeof p.time === 'string' ? p.time : '') + ' · ' + parts.join(' · ');
+  });
+  window.addEventListener('resize', () => chart.applyOptions({ width: box.clientWidth }));
+})();
+"""
+
+
+def build_bond_card_html(bond_data):
+    """Card lãi suất trái phiếu 30 năm toàn cầu (biểu đồ nhiều đường, dữ liệu từ tvdatafeed)."""
+    if not bond_data or not bond_data.get("series"):
+        return """<div class="card" id="section-global-yields">
+  <div class="section-title">🌍 Xu hướng lãi suất toàn cầu (trái phiếu 30 năm)</div>
+  <div class="hint">Chưa có dữ liệu (bond_yields.json). Chạy workflow cập nhật dữ liệu để lấy từ TradingView.</div>
+</div>"""
+    payload = json.dumps(bond_data["series"], ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    script = (BOND_SCRIPT.replace("%%BOND_JSON%%", payload)
+              .replace("%%BOND_COLORS%%", json.dumps(BOND_COLORS)))
+    return f"""<div class="card" id="section-global-yields">
+  <div class="section-title">🌍 Xu hướng lãi suất toàn cầu (trái phiếu 30 năm)</div>
+  <div class="hint">Nguồn: TradingView (TVC) qua tvdatafeed · dữ liệu theo tuần · Cập nhật lần cuối: {bond_data.get("updated_at", "")} · Tích/bỏ tích tên nước để ẩn/hiện đường</div>
+  <div id="bond-legend" class="bond-legend"></div>
+  <div id="bond-info" class="hint" style="min-height:18px;margin:6px 0;"></div>
+  <div id="bond-chart" style="width:100%;height:420px;"></div>
+</div>
+<script>
+{script}
+</script>"""
+
 
 # ============================================================================
 # 4. MAIN
@@ -1350,6 +1693,15 @@ def main():
 
     macro_data_json = json.dumps(macro_data, ensure_ascii=False)
 
+    bond_data = {}
+    if os.path.exists(BOND_DATA_FILE):
+        try:
+            with open(BOND_DATA_FILE, encoding="utf-8") as f:
+                bond_data = json.load(f)
+            print(f"Đã đọc {BOND_DATA_FILE} ({len(bond_data.get('series', {}))} nước)")
+        except Exception as e:
+            print(f"CẢNH BÁO: Không đọc được {BOND_DATA_FILE}: {e}")
+
     # --- Đọc dữ liệu báo cáo tài chính từ financials_data.json (nếu có) ---
     financials_data = {}
     if os.path.exists(FINANCIALS_DATA_FILE):
@@ -1360,9 +1712,26 @@ def main():
         except Exception as e:
             print(f"CẢNH BÁO: Không đọc được {FINANCIALS_DATA_FILE}: {e}")
 
+    # --- Đọc tin tức tổng hợp từ news_data.json (nếu có) ---
+    news_data = {}
+    if os.path.exists(NEWS_DATA_FILE):
+        try:
+            with open(NEWS_DATA_FILE, encoding="utf-8") as f:
+                news_data = json.load(f)
+            print(f"Đã đọc {NEWS_DATA_FILE} ({len(news_data.get('articles', []))} bài)")
+        except Exception as e:
+            print(f"CẢNH BÁO: Không đọc được {NEWS_DATA_FILE}: {e}")
+
     has_moneyflow = bool(index_data)
     has_macro = bool(macro_data.get("series")) if macro_data else False
     has_financials = bool(financials_data.get("tickers")) if financials_data else False
+    has_news = bool(news_data.get("articles")) if news_data else False
+
+    # Trang Lọc KLGD: tính sớm để biết có hiện mục nav hay không
+    global HAS_VOLUME_PAGE
+    vol_screen = compute_volume_screen(df, scores.set_index("ticker")["RS"].to_dict(), industry_map.to_dict())
+    has_volume_page = bool(vol_screen) and bool(vol_screen["day"] or vol_screen["week"])
+    HAS_VOLUME_PAGE = has_volume_page
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -1409,6 +1778,7 @@ def main():
         has_moneyflow=has_moneyflow,
         has_macro=has_macro,
         has_financials=has_financials,
+        has_news=has_news,
         updated_at=updated_at,
         body_html=ranking_body,
         script_js=ranking_script,
@@ -1451,6 +1821,7 @@ def main():
             has_moneyflow=has_moneyflow,
             has_macro=has_macro,
             has_financials=has_financials,
+            has_news=has_news,
             updated_at=updated_at,
             body_html=moneyflow_body,
             script_js=moneyflow_script,
@@ -1480,42 +1851,9 @@ def main():
         for _fp in fed_projections.values():
             fed_vintage_count = max(fed_vintage_count, len(_fp.get("vintages", [])))
 
+        bond_card_html = build_bond_card_html(bond_data)
         macro_body = f"""
-<div class="card" id="section-global-yields">
-  <div class="section-title">🌍 Xu hướng lãi suất toàn cầu (trái phiếu 30 năm)</div>
-  <div class="hint">Widget trực tiếp từ TradingView (dữ liệu TVC) — không qua pipeline tự fetch của dashboard nên luôn là dữ liệu mới nhất. Bấm vào tên mã trên biểu đồ để đổi/thêm quốc gia khác.</div>
-  <div class="tradingview-widget-container" style="height:460px;">
-    <div class="tradingview-widget-container__widget" style="height:100%;width:100%;"></div>
-    <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-    {{
-      "autosize": true,
-      "symbol": "TVC:US30Y",
-      "interval": "W",
-      "timezone": "Asia/Ho_Chi_Minh",
-      "theme": "dark",
-      "style": "2",
-      "locale": "vi_VN",
-      "backgroundColor": "rgba(18, 27, 48, 1)",
-      "gridColor": "rgba(34, 48, 74, 1)",
-      "hide_top_toolbar": false,
-      "hide_legend": false,
-      "allow_symbol_change": true,
-      "compareSymbols": [
-        {{ "symbol": "TVC:JP30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:FR30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:GB30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:DE30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:KR30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:AU30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:NL30Y", "position": "SameScale" }},
-        {{ "symbol": "TVC:CN30Y", "position": "SameScale" }}
-      ],
-      "support_host": "https://www.tradingview.com"
-    }}
-    </script>
-  </div>
-  <div class="hint" style="margin-top:6px;">Nếu 1 mã không hiện (ví dụ Hàn Quốc/Trung Quốc tuỳ nguồn), dùng nút đổi mã ngay trên biểu đồ để tìm lại ký hiệu đúng trên TradingView.</div>
-</div>
+{bond_card_html}
 
 <div class="card" id="section-macro">
   <div class="section-title">🌐 Xem chi tiết 1 chỉ số</div>
@@ -1557,6 +1895,7 @@ def main():
             has_moneyflow=has_moneyflow,
             has_macro=has_macro,
             has_financials=has_financials,
+            has_news=has_news,
             updated_at=updated_at,
             body_html=macro_body,
             script_js=macro_script,
@@ -1609,6 +1948,7 @@ def main():
             has_moneyflow=has_moneyflow,
             has_macro=has_macro,
             has_financials=has_financials,
+            has_news=has_news,
             updated_at=updated_at,
             body_html=financials_body,
             script_js=financials_script,
@@ -1619,10 +1959,116 @@ def main():
         if os.path.exists(FINANCIALS_FILE):
             os.remove(FINANCIALS_FILE)
 
+    # ---------------- TRANG 5: news.html (Tin tức tổng hợp) ----------------
+    if has_news:
+        news_updated = news_data.get("updated_at", "")
+        news_categories = news_data.get("categories", [])
+        news_article_count = len(news_data.get("articles", []))
+
+        news_tabs_html = '<button class="news-subtab-btn subtab-btn subtab-active" onclick="switchNewsCategory(\'all\', this)">Tất cả</button>'
+        for cat in news_categories:
+            news_tabs_html += (
+                f'<button class="news-subtab-btn subtab-btn" '
+                f'onclick="switchNewsCategory(\'{cat}\', this)">{cat}</button>'
+            )
+
+        news_body = f"""
+<div class="card" id="section-news">
+  <div class="section-title">📰 Tin tức tổng hợp</div>
+  <div class="hint">Nguồn: CafeF · Vietstock · Investing.com (RSS công khai) · Cập nhật lần cuối: {news_updated} · {news_article_count} bài gần nhất</div>
+  <div class="hint">Tag mã (VD <span class="news-tag">VIC</span>) được gắn tự động khi tiêu đề/tóm tắt có nhắc mã viết HOA — chỉ là gợi ý theo từ khoá, có thể sót hoặc nhầm.</div>
+  <div class="subtabs" style="flex-wrap:wrap;">{news_tabs_html}</div>
+  <div class="table-toolbar">
+    <input type="text" id="news-search" class="search-box" placeholder="🔍 Tìm theo từ khoá hoặc mã (VD: VIC, ngân hàng, Fed...)">
+    <span class="table-count" id="news-count"></span>
+  </div>
+  <div id="news-list-container"></div>
+</div>
+"""
+        news_json = json.dumps(
+            {"articles": news_data.get("articles", []), "categories": news_categories},
+            ensure_ascii=False,
+        )
+        # Tránh "</script>" trong dữ liệu bài viết làm vỡ thẻ <script> nhúng
+        news_json = news_json.replace("</", "<\\/")
+        news_script = NEWS_SCRIPT.replace("%%NEWS_DATA_JSON%%", news_json)
+        news_html_out = render_page(
+            page_title="Tin tức — RS Dashboard",
+            h1="📰 Tin tức tổng hợp",
+            active_nav="news",
+            has_moneyflow=has_moneyflow,
+            has_macro=has_macro,
+            has_financials=has_financials,
+            has_news=has_news,
+            updated_at=updated_at,
+            body_html=news_body,
+            script_js=news_script,
+        )
+        with open(NEWS_FILE, "w", encoding="utf-8") as f:
+            f.write(news_html_out)
+    else:
+        if os.path.exists(NEWS_FILE):
+            os.remove(NEWS_FILE)
+
+    # ---------------- TRANG 6: volume.html (Lọc KLGD giảm dần) ----------------
+    if has_volume_page:
+        cand = {r["t"] for fr in ("day", "week") for r in vol_screen[fr]}
+        vol_chart_data = {t: rows[-500:] for t, rows in chart_data.items() if t in cand}
+        n_day_full = sum(1 for r in vol_screen["day"] if r["n"] >= 4)
+        n_week_full = sum(1 for r in vol_screen["week"] if r["n"] >= 4)
+        helpers = RANKING_SCRIPT[RANKING_SCRIPT.index("function getMonday"):RANKING_SCRIPT.index("function closeGroupPopup")]
+        vol_script = (
+            VOLUME_SCRIPT
+            .replace("%%CHART_HELPERS%%", helpers)
+            .replace("%%VOL_DATA_JSON%%", json.dumps(vol_screen, ensure_ascii=False))
+            .replace("%%CHART_DATA_JSON%%", json.dumps(vol_chart_data, ensure_ascii=False, separators=(",", ":")))
+            .replace("%%HAS_OHLC_JSON%%", json.dumps(has_ohlc))
+            .replace("%%HAS_VOLUME_JSON%%", json.dumps(has_volume))
+        )
+        vol_body = f"""
+<div class="card" id="section-volume">
+  <div class="section-title">📉 Lọc cổ phiếu có khối lượng giao dịch giảm dần</div>
+  <div class="hint">Điều kiện: KLGD trung bình 5 &lt; 10 &lt; 20 &lt; 40 (phiên với khung Ngày, tuần với khung Tuần; KLGD tuần = tổng các phiên trong tuần, tuần kết thúc thứ Sáu). Không lọc theo thanh khoản — cột GTGD TB20 (tỷ đồng/phiên) chỉ để tham khảo. Bấm tiêu đề cột để sắp xếp, bấm vào mã để xem biểu đồ nến + volume.</div>
+  <div class="hint" id="vol-asof"></div>
+  <div class="tf-toggle-row">
+    <button class="tf-toggle-btn vol-frame-btn tf-toggle-active" onclick="setVolFrame('day', this)">Ngày ({n_day_full} mã đủ 4 mốc)</button>
+    <button class="tf-toggle-btn vol-frame-btn" onclick="setVolFrame('week', this)">Tuần ({n_week_full} mã đủ 4 mốc)</button>
+  </div>
+  <div class="vol-opts">
+    <label><input type="checkbox" id="vol-near"> Hiện cả mã gần đạt (3/4 mốc: TB5 &lt; TB10 &lt; TB20 nhưng chưa &lt; TB40)</label>
+  </div>
+  <div class="table-toolbar">
+    <input type="text" id="vol-search" class="search-box" placeholder="🔍 Lọc theo mã hoặc ngành...">
+    <span class="table-count" id="vol-count"></span>
+  </div>
+  <div id="vol-table-container"></div>
+</div>
+"""
+        vol_overlay = ranking_extra[:ranking_extra.index('<div id="group-overlay"')]
+        vol_html_out = render_page(
+            page_title="Lọc KLGD giảm dần — RS Dashboard",
+            h1="📉 Lọc KLGD giảm dần",
+            active_nav="volume",
+            has_moneyflow=has_moneyflow,
+            has_macro=has_macro,
+            has_financials=has_financials,
+            has_news=has_news,
+            updated_at=updated_at,
+            body_html=vol_body,
+            script_js=vol_script,
+            extra_html=vol_overlay,
+        )
+        with open(VOLUME_FILE, "w", encoding="utf-8") as f:
+            f.write(vol_html_out)
+    elif os.path.exists(VOLUME_FILE):
+        os.remove(VOLUME_FILE)
+
     chart_kind = "nến+volume" if (has_ohlc and has_volume) else ("nến" if has_ohlc else "đường (thiếu OHLC đầy đủ)")
     files_created = (
         [RANKING_FILE]
+        + ([NEWS_FILE] if has_news else [])
         + ([MONEYFLOW_FILE] if has_moneyflow else [])
+        + ([VOLUME_FILE] if has_volume_page else [])
         + ([FINANCIALS_FILE] if has_financials else [])
         + ([MACRO_HTML_FILE] if has_macro else [])
     )
