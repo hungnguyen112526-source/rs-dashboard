@@ -12,3 +12,5 @@ vnai
 fredapi
 wbgapi
 yfinance
+feedparser
+tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git
