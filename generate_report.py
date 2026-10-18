@@ -1428,6 +1428,33 @@ def build_bond_card_html(bond_data):
 </script>"""
 
 
+VNINDEX_SCRIPT = """
+const VNINDEX_ROWS = %%VNINDEX_JSON%%;
+const HAS_OHLC = %%HAS_OHLC_JSON%%;
+const HAS_VOLUME = %%HAS_VOLUME_JSON%%;
+
+%%CHART_HELPERS%%
+
+(function() {
+  const mount = document.getElementById('vnindex-mount');
+  if (!mount || !VNINDEX_ROWS.length) return;
+  mountChart(mount, VNINDEX_ROWS, 420, 'VN-Index');
+  const n = VNINDEX_ROWS.length;
+  const last = VNINDEX_ROWS[n - 1];
+  const close = r => r[r.length >= 5 ? 4 : 1];
+  const el = document.getElementById('vnindex-summary');
+  if (el) {
+    let txt = last[0] + ': <b>' + close(last).toLocaleString('vi-VN', {maximumFractionDigits: 2}) + '</b>';
+    if (n > 1) {
+      const pct = (close(last) / close(VNINDEX_ROWS[n - 2]) - 1) * 100;
+      txt += ' (<span style="color:' + (pct >= 0 ? '#4ade80' : '#f87171') + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</span> so với phiên trước)';
+    }
+    el.innerHTML = txt;
+  }
+})();
+"""
+
+
 # ============================================================================
 # 4. MAIN
 # ============================================================================
@@ -1852,8 +1879,19 @@ def main():
             fed_vintage_count = max(fed_vintage_count, len(_fp.get("vintages", [])))
 
         bond_card_html = build_bond_card_html(bond_data)
+        vn_rows = build_chart_data(vnindex_df)[0].get("VNINDEX") if not vnindex_df.empty else None
+        vnindex_card_html = (
+            """<div class="card" id="section-vnindex">
+  <div class="section-title">📈 VN-Index</div>
+  <div class="hint">Nguồn: dữ liệu giá của dashboard (gia_lich_su_rs.csv) · nến + khối lượng · chọn khung Ngày/Tuần · <span id="vnindex-summary"></span></div>
+  <div id="vnindex-mount"></div>
+</div>"""
+            if vn_rows else ""
+        )
         macro_body = f"""
 {bond_card_html}
+
+{vnindex_card_html}
 
 <div class="card" id="section-macro">
   <div class="section-title">🌐 Xem chi tiết 1 chỉ số</div>
@@ -1888,6 +1926,15 @@ def main():
 </div>
 """
         macro_script = MACRO_SCRIPT.replace("%%MACRO_DATA_JSON%%", macro_data_json)
+        if vn_rows:
+            _helpers = RANKING_SCRIPT[RANKING_SCRIPT.index("function getMonday"):RANKING_SCRIPT.index("function closeChart")]
+            macro_script += (
+                VNINDEX_SCRIPT
+                .replace("%%CHART_HELPERS%%", _helpers)
+                .replace("%%VNINDEX_JSON%%", json.dumps(vn_rows, separators=(",", ":")))
+                .replace("%%HAS_OHLC_JSON%%", json.dumps(has_ohlc))
+                .replace("%%HAS_VOLUME_JSON%%", json.dumps(has_volume))
+            )
         macro_html_out = render_page(
             page_title="Dữ liệu vĩ mô — RS Dashboard",
             h1="🌐 Dữ liệu vĩ mô",
@@ -2028,8 +2075,32 @@ def main():
         vol_body = f"""
 <div class="card" id="section-volume">
   <div class="section-title">📉 Lọc cổ phiếu có khối lượng giao dịch giảm dần</div>
-  <div class="hint">Điều kiện: KLGD trung bình 5 &lt; 10 &lt; 20 &lt; 40 (phiên với khung Ngày, tuần với khung Tuần; KLGD tuần = tổng các phiên trong tuần, tuần kết thúc thứ Sáu). Không lọc theo thanh khoản — cột GTGD TB20 (tỷ đồng/phiên) chỉ để tham khảo. Bấm tiêu đề cột để sắp xếp, bấm vào mã để xem biểu đồ nến + volume.</div>
+  <details class="formula-box" open>
+    <summary class="formula-title"><span class="formula-arrow">▶</span> ℹ️ Trang này lọc gì? Cách đọc kết quả — bấm để thu gọn/mở</summary>
+    <ol class="formula-list">
+      <li><b>Ý tưởng:</b> tìm cổ phiếu mà <b>lượng giao dịch đang cạn dần</b> — nhà đầu tư bớt quan tâm, bán ra ít đi và cũng ít người mua. Thường gặp khi giá đi ngang tích lũy, hoặc khi nhịp giảm sắp hết lực bán. Đây chỉ là bộ lọc để <i>chọn mã đáng theo dõi</i>, không phải tín hiệu mua/bán.</li>
+      <li><b>Điều kiện (4 mốc):</b> KLGD trung bình của <b>5 &lt; 10 &lt; 20 &lt; 40</b> phiên gần nhất. Nghĩa là càng gần hiện tại, khối lượng trung bình càng thấp — khối lượng giảm dần liên tục theo thời gian.</li>
+      <li><b>Khung Ngày:</b> mỗi mốc là số <b>phiên</b>. <b>Khung Tuần:</b> mỗi mốc là số <b>tuần</b>, KLGD của một tuần = tổng KLGD các phiên trong tuần (tuần kết thúc thứ Sáu). Khung Tuần cho tín hiệu chậm hơn nhưng ít nhiễu hơn.</li>
+      <li><b>Số mốc đạt:</b> <span class="vol-full">4/4</span> = đạt đủ cả chuỗi TB5 &lt; TB10 &lt; TB20 &lt; TB40 (mặc định chỉ hiện nhóm này). <span class="vol-near">3/4</span> = mới giảm đến TB20 (TB5 &lt; TB10 &lt; TB20) nhưng TB20 chưa thấp hơn TB40 — "gần đạt", tích ô bên dưới để xem thêm.</li>
+      <li><b>% TB5 so với TB40:</b> KLGD 5 phiên/tuần gần nhất đang thấp hơn mức trung bình dài hạn bao nhiêu %. Số càng âm sâu thì khối lượng càng cạn.</li>
+      <li><b>GTGD TB20 (tỷ):</b> giá trị giao dịch trung bình 20 phiên (giá × khối lượng), tính theo tỷ đồng/phiên. Chỉ để tham khảo mức thanh khoản — <b>trang không lọc theo thanh khoản</b>, nên có mã thanh khoản rất thấp (khó mua bán) cũng xuất hiện; hãy xem cột này trước khi quan tâm một mã. <b>RS</b> là điểm sức mạnh giá (1–99) từ trang Xếp hạng, giúp phân biệt mã khối lượng cạn khi giá còn mạnh với mã đang yếu.</li>
+      <li><b>Lưu ý:</b> phiên/tuần đang diễn ra bị loại khỏi phép tính (khối lượng chưa đủ), nên dòng "Tính đến…" cho biết mốc dữ liệu cuối cùng. Khối lượng giảm không đồng nghĩa giá sẽ tăng — nên kết hợp với xu hướng giá trên biểu đồ (bấm vào mã) và các trang khác.</li>
+    </ol>
+  </details>
   <div class="hint" id="vol-asof"></div>
+  <details class="formula-box">
+    <summary class="formula-title"><span class="formula-arrow">▶</span> 📖 Bộ lọc này làm gì? Cách đọc kết quả — bấm để xem</summary>
+    <ol class="formula-list">
+      <li><b>Ý nghĩa:</b> tìm cổ phiếu mà lượng khớp lệnh đang <b>co hẹp dần</b> — người mua/bán thưa dần, cổ phiếu "im ắng" hơn so với trước. Thường dùng để phát hiện giai đoạn tích luỹ/đi ngang, cạn cung hoặc chờ một nhịp bứt phá. Đây chỉ là công cụ sàng lọc ban đầu, <b>không phải tín hiệu mua/bán</b>.</li>
+      <li><b>Điều kiện:</b> KLGD trung bình 5 &lt; 10 &lt; 20 &lt; 40 (TB5 là trung bình 5 phiên gần nhất, v.v.). Nghĩa là càng gần hiện tại, khối lượng trung bình càng thấp.</li>
+      <li><b>Khung Ngày / Tuần:</b> khung Ngày tính theo phiên (phản ánh xu hướng ngắn hạn); khung Tuần tính theo tuần (KLGD tuần = tổng các phiên trong tuần, ít nhiễu hơn, phản ánh xu hướng trung hạn).</li>
+      <li><b>Số mốc đạt:</b> <span class="vol-full">4/4</span> = TB5 &lt; TB10 &lt; TB20 &lt; TB40 (đạt đủ, mặc định hiển thị). <span class="vol-near">3/4</span> = mới đạt TB5 &lt; TB10 &lt; TB20, chưa &lt; TB40 (gần đạt, tích ô bên dưới để hiện).</li>
+      <li><b>% TB5 so với TB40:</b> khối lượng gần đây đang thấp hơn mức nền dài hạn bao nhiêu phần trăm. Số càng âm → khối lượng càng cạn.</li>
+      <li><b>GTGD TB20 (tỷ):</b> giá trị giao dịch trung bình 20 phiên (giá × KLGD), tính bằng tỷ đồng/phiên. Chỉ để tham khảo thanh khoản, <b>không dùng để lọc</b> — mã thanh khoản thấp có thể xuất hiện trong danh sách, nên xem cột này trước khi quan tâm.</li>
+      <li><b>RS:</b> điểm sức mạnh giá (1–99) từ trang Xếp hạng. Kết hợp với bộ lọc: mã RS cao mà khối lượng cạn dần thường là mã đang nghỉ trong xu hướng tăng; mã RS thấp thì khối lượng cạn có thể chỉ là mất dòng tiền.</li>
+      <li><b>Lưu ý:</b> phiên/tuần đang diễn ra không được tính (khối lượng chưa đủ). Khối lượng thấp không đồng nghĩa giá sẽ tăng hay giảm — nên kết hợp xem biểu đồ (bấm vào mã) và các yếu tố khác.</li>
+    </ol>
+  </details>
   <div class="tf-toggle-row">
     <button class="tf-toggle-btn vol-frame-btn tf-toggle-active" onclick="setVolFrame('day', this)">Ngày ({n_day_full} mã đủ 4 mốc)</button>
     <button class="tf-toggle-btn vol-frame-btn" onclick="setVolFrame('week', this)">Tuần ({n_week_full} mã đủ 4 mốc)</button>
