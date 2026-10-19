@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import auth, engine, ui  # noqa: E402
+from src import auth, engine, pages_extra, ui  # noqa: E402
 
 st.set_page_config(page_title="RS Dashboard", page_icon="📈", layout="wide", initial_sidebar_state="auto")
 ui.apply_css()
@@ -258,6 +258,27 @@ def page_vol():
                           column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
 
 
+# ---------------------------------------------------------------------------
+# Các trang còn lại (logic nằm trong src/pages_extra.py)
+# ---------------------------------------------------------------------------
+def page_news():
+    pages_extra.render_news(pages_extra.load_json("news_data.json"))
+
+
+def page_flow():
+    pages_extra.render_flow(stocks, vnindex, str(data_path), MTIME)
+
+
+def page_fin():
+    ind_map = stocks.drop_duplicates("ticker").set_index("ticker")["industry"].to_dict()
+    pages_extra.render_fin(pages_extra.load_json("financials_data.json"), ind_map)
+
+
+def page_macro():
+    pages_extra.render_macro(pages_extra.load_json("macro_data.json"),
+                             pages_extra.load_json("bond_yields.json"), vnindex)
+
+
 def page_admin():
     ui.render_admin_page()
 
@@ -265,7 +286,11 @@ def page_admin():
 # ---- Điều hướng ngang phía trên ----
 pages = [
     st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs", default=True),
+    st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
+    st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
     st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
+    st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
+    st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
 ]
 if is_admin:
     pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
