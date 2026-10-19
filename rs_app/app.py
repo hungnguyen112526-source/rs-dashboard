@@ -283,7 +283,7 @@ def page_admin():
     ui.render_admin_page()
 
 
-# ---- Điều hướng ngang phía trên ----
+# ---- Điều hướng ở thanh bên trái ----
 pages = [
     st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs", default=True),
     st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
@@ -294,4 +294,4 @@ pages = [
 ]
 if is_admin:
     pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
-st.navigation(pages, position="top").run()
+st.navigation(pages, position="sidebar").run()
