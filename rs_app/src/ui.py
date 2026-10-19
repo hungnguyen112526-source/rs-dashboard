@@ -1,4 +1,5 @@
 """Giao diện: CSS, cổng đăng nhập/đăng ký, trang quản trị, biểu đồ nến."""
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -8,12 +9,40 @@ from src import auth
 
 CSS = """
 <style>
-.block-container { padding-top: 1.6rem; max-width: 1280px; }
-.auth-card { background: linear-gradient(135deg,#0f172a,#1e293b); border-radius:16px; padding:1.4rem 1.2rem; text-align:center; color:#e2e8f0; margin-bottom:1rem; }
-.auth-title { font-weight:800; font-size:1.25rem; letter-spacing:.02em; }
-.auth-sub { color:#94a3b8; font-size:.88rem; margin-top:.2rem; }
-.hint-box { background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; padding:.7rem .9rem; font-size:.85rem; color:#475569; }
-.asof { color:#64748b; font-size:.85rem; margin-bottom:.4rem; }
+/* Màu dùng rgba trung tính -> đẹp trên cả nền sáng lẫn tối */
+.block-container { padding-top: 4.5rem; max-width: 1280px; }
+footer, [data-testid="stDeployButton"] { display: none !important; }
+
+/* Thẻ: st.container(border=True, key="card_...") */
+[class*="st-key-card"] { border-radius: 12px; box-shadow: 0 1px 3px rgba(15,39,66,.10); }
+[data-testid="stMetricValue"] { font-weight: 700; }
+[data-testid="stMetricLabel"] p { opacity: .72; font-size: .85rem; }
+
+.auth-card { background: rgba(127,127,127,.08); border: 1px solid rgba(127,127,127,.28); border-radius: 14px;
+             padding: 1.4rem 1.2rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 2px 8px rgba(15,39,66,.10); }
+.auth-title { font-weight: 800; font-size: 1.25rem; letter-spacing: .02em; }
+.auth-sub { opacity: .7; font-size: .88rem; margin-top: .2rem; }
+.hint-box { background: rgba(127,127,127,.08); border: 1px dashed rgba(127,127,127,.4); border-radius: 8px;
+            padding: .7rem .9rem; font-size: .85rem; opacity: .9; }
+.asof { opacity: .7; font-size: .85rem; margin-bottom: .4rem; }
+
+.auth-logo { width: 54px; height: 54px; margin: 0 auto .6rem; border-radius: 14px; display: flex; align-items: center;
+             justify-content: center; font-size: 1.7rem; background: linear-gradient(135deg,#1d4ed8,#3b82f6); box-shadow: 0 4px 12px rgba(29,78,216,.35); }
+.auth-head { text-align: center; margin-bottom: .6rem; }
+.auth-foot { text-align: center; font-size: .75rem; opacity: .55; margin-top: .8rem; }
+
+/* ---- Điện thoại ---- */
+@media (max-width: 640px) {
+  .block-container { padding: 3.6rem .8rem 2rem !important; }
+  h1, h2 { font-size: 1.35rem !important; line-height: 1.3 !important; }
+  [data-testid="stMain"] [data-testid="stColumn"] { min-width: 100% !important; flex: 1 1 100% !important; }
+  /* hàng thẻ số: 2 thẻ / hàng */
+  [data-testid="stMain"] [data-testid="stHorizontalBlock"]:has([class*="st-key-card_kpi"]) > [data-testid="stColumn"] {
+      min-width: calc(50% - .5rem) !important; flex: 1 1 calc(50% - .5rem) !important; }
+  [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
+  [data-testid="stMetricLabel"] p { font-size: .78rem; }
+  [class*="st-key-card"] { border-radius: 10px; }
+}
 </style>
 """
 
@@ -26,20 +55,31 @@ def apply_css():
 # Cổng đăng nhập / đăng ký
 # ----------------------------------------------------------------------------
 
+AUTH_CSS = """
+<style>
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="stExpandSidebarButton"] { display: none !important; }
+.block-container { padding-top: 9vh; max-width: 520px; }
+@media (max-width: 640px) { .block-container { padding-top: 3.6rem; } }
+</style>
+"""
+
+
 def render_auth_portal():
-    _, col, _ = st.columns([1, 2.2, 1])
-    with col:
+    """Cổng đăng nhập: thẻ gọn ở giữa trang, không sidebar."""
+    st.markdown(AUTH_CSS, unsafe_allow_html=True)
+    with st.container(border=True, key="card_auth"):
         st.markdown(
-            '<div class="auth-card"><div class="auth-title">📈 RS DASHBOARD</div>'
-            '<div class="auth-sub">Xếp hạng sức mạnh giá · Lọc khối lượng · Dòng tiền cổ phiếu Việt Nam</div></div>',
+            '<div class="auth-head"><div class="auth-logo">📈</div>'
+            '<div class="auth-title">RS DASHBOARD</div>'
+            '<div class="auth-sub">Xếp hạng sức mạnh giá · Lọc khối lượng · Cổ phiếu Việt Nam</div></div>',
             unsafe_allow_html=True,
         )
         tab_login, tab_reg = st.tabs(["🔑 Đăng nhập", "📝 Đăng ký"])
 
         with tab_login:
             with st.form("form_login"):
-                uname = st.text_input("👤 Tên đăng nhập")
-                pwd = st.text_input("🔒 Mật khẩu", type="password")
+                uname = st.text_input("Tên đăng nhập", placeholder="👤 Tên đăng nhập", label_visibility="collapsed")
+                pwd = st.text_input("Mật khẩu", type="password", placeholder="🔒 Mật khẩu", label_visibility="collapsed")
                 go_btn = st.form_submit_button("Đăng nhập", width="stretch", type="primary")
             if go_btn:
                 ok, msg, user = auth.authenticate(uname, pwd)
@@ -61,6 +101,8 @@ def render_auth_portal():
             if reg_btn:
                 ok, msg = auth.register_user(new_user, fullname, email, pw1, pw2)
                 (st.success if ok else st.error)(msg)
+
+        st.markdown('<div class="auth-foot">Công cụ sàng lọc, không phải khuyến nghị đầu tư.</div>', unsafe_allow_html=True)
 
 
 # ----------------------------------------------------------------------------
@@ -107,18 +149,110 @@ def render_admin_page():
 
 
 # ----------------------------------------------------------------------------
+# Thẻ số tổng quan
+# ----------------------------------------------------------------------------
+
+def kpi_row(items):
+    """items: list[(nhãn, giá trị, ghi chú|None)] -> 1 hàng thẻ số."""
+    cols = st.columns(len(items))
+    for i, (col, (label, value, note)) in enumerate(zip(cols, items)):
+        with col.container(border=True, key=f"card_kpi_{i}_{label[:6]}"):
+            st.metric(label, value, help=note)
+
+
+# ----------------------------------------------------------------------------
+# Tô màu bảng (Styler) — dùng rgba nên hợp cả nền sáng/tối
+# ----------------------------------------------------------------------------
+_ZEBRA = "background-color: rgba(127,127,127,.07)"
+
+
+def _zebra(df: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame("", index=df.index, columns=df.columns)
+    out.iloc[1::2, :] = _ZEBRA
+    return out
+
+
+def _cellmap(styler, func, subset):
+    return (styler.map if hasattr(styler, "map") else styler.applymap)(func, subset=subset)
+
+
+def _bg_drop(v):
+    """% TB5 so với TB40: càng âm càng đỏ."""
+    if pd.isna(v) or v >= 0:
+        return ""
+    a = 0.10 + 0.40 * min(abs(v) / 70.0, 1.0)
+    return f"background-color: rgba(239,68,68,{a:.2f}); font-weight: 600"
+
+
+def _bg_tiers(v):
+    if v == "4/4":
+        return "background-color: rgba(34,197,94,.30); font-weight: 700"
+    if v == "3/4":
+        return "background-color: rgba(234,179,8,.34); font-weight: 700"
+    return ""
+
+
+def _fg_sign(v):
+    if pd.isna(v):
+        return ""
+    return "color: #16a34a" if v > 0 else ("color: #dc2626" if v < 0 else "")
+
+
+def style_volume(df: pd.DataFrame):
+    """Bảng lọc KLGD: nền đỏ nhạt theo % giảm, nhãn mốc xanh/vàng, dòng xen kẽ."""
+    d = df.copy()
+    d["Số mốc đạt"] = d["Số mốc đạt"].astype(int).map(lambda n: f"{n}/4")
+    fmt = {c: "{:,.0f}" for c in ["TB5", "TB10", "TB20", "TB40"] if c in d}
+    fmt["% TB5 so với TB40"] = "{:.1f}%"
+    fmt["GTGD TB20 (tỷ)"] = "{:,.1f}"
+    st_ = d.style.apply(_zebra, axis=None).format(fmt, na_rep="–")
+    st_ = _cellmap(st_, _bg_drop, ["% TB5 so với TB40"])
+    st_ = _cellmap(st_, _bg_tiers, ["Số mốc đạt"])
+    return st_
+
+
+def style_rs(df: pd.DataFrame):
+    """Bảng RS: chữ xanh/đỏ cho %Δ từng khối, dòng xen kẽ. Cột RS dùng ProgressColumn."""
+    pct_cols = [c for c in df.columns if c.startswith("Khối")]
+    fmt = {c: "{:+.1f}%" for c in pct_cols}
+    fmt["Điểm thô"] = "{:.1f}"
+    st_ = df.style.apply(_zebra, axis=None).format(fmt, na_rep="–")
+    return _cellmap(st_, _fg_sign, pct_cols)
+
+
+RS_COLUMN = st.column_config.ProgressColumn("RS", min_value=1, max_value=99, format="%d")
+CODE_COLUMN = st.column_config.TextColumn("Mã", pinned=True)  # giữ cố định khi cuộn ngang (điện thoại)
+
+
+# ----------------------------------------------------------------------------
 # Biểu đồ nến + volume
 # ----------------------------------------------------------------------------
 
-def candle_chart(ohlcv: pd.DataFrame, title: str) -> go.Figure:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.75, 0.25], vertical_spacing=0.03)
+def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go.Figure:
+    """Nến + volume + đường TB khối lượng 5/20. Không ép nền -> theo theme sáng/tối của app."""
+    ohlcv = ohlcv.copy()
+    has_vol = "volume" in ohlcv.columns
+    if has_vol:
+        ohlcv["ma5"] = ohlcv["volume"].rolling(5).mean()
+        ohlcv["ma20"] = ohlcv["volume"].rolling(20).mean()
+    if tail:
+        ohlcv = ohlcv.tail(tail)
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.74, 0.26], vertical_spacing=0.03)
     fig.add_trace(go.Candlestick(
         x=ohlcv.index, open=ohlcv["open"], high=ohlcv["high"], low=ohlcv["low"], close=ohlcv["close"],
-        increasing_line_color="#22c55e", decreasing_line_color="#ef4444", name="Giá"), row=1, col=1)
-    if "volume" in ohlcv.columns:
-        colors = ["rgba(34,197,94,.5)" if c >= o else "rgba(239,68,68,.5)" for o, c in zip(ohlcv["open"], ohlcv["close"])]
+        increasing_line_color="#16a34a", decreasing_line_color="#dc2626", name="Giá"), row=1, col=1)
+    if has_vol:
+        colors = ["rgba(22,163,74,.45)" if c >= o else "rgba(220,38,38,.45)" for o, c in zip(ohlcv["open"], ohlcv["close"])]
         fig.add_trace(go.Bar(x=ohlcv.index, y=ohlcv["volume"], marker_color=colors, name="KLGD"), row=2, col=1)
-    fig.update_layout(title=title, height=520, showlegend=False, margin=dict(l=10, r=10, t=40, b=10),
-                      xaxis_rangeslider_visible=False, template="plotly_white")
-    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        fig.add_trace(go.Scatter(x=ohlcv.index, y=ohlcv["ma5"], mode="lines", name="TB5",
+                                 line=dict(color="#f59e0b", width=1.4)), row=2, col=1)
+        fig.add_trace(go.Scatter(x=ohlcv.index, y=ohlcv["ma20"], mode="lines", name="TB20",
+                                 line=dict(color="#2563eb", width=1.4)), row=2, col=1)
+    fig.update_layout(title=title, height=460, showlegend=has_vol, margin=dict(l=10, r=10, t=40, b=10),
+                      legend=dict(orientation="h", y=-0.02, x=1, xanchor="right"),
+                      xaxis_rangeslider_visible=False)
+    grid = "rgba(128,128,128,.18)"
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])], gridcolor=grid)
+    fig.update_yaxes(gridcolor=grid)
     return fig
