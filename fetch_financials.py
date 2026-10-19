@@ -85,12 +85,29 @@ def to_jsonable(v):
     return v
 
 
+META_COLS = ("item", "item_en", "item_id")
+
+
+def trim_wide(df: pd.DataFrame, max_periods: int = MAX_PERIODS) -> pd.DataFrame:
+    """Định dạng vnstock 4.x: MỖI DÒNG là 1 chỉ tiêu (item/item_en/item_id), MỖI CỘT là 1 kỳ
+    (vd '2026-Q2'). Giữ TOÀN BỘ dòng chỉ tiêu, chỉ cắt bớt số cột kỳ: giữ max_periods kỳ mới nhất,
+    xếp kỳ mới nhất sang trái. (Nhãn kỳ dạng 'YYYY-Qn'/'YYYY' sắp theo chữ cũng là sắp theo thời gian.)"""
+    meta = [c for c in df.columns if c in META_COLS]
+    periods = sorted((c for c in df.columns if c not in META_COLS), key=str, reverse=True)[:max_periods]
+    return df[meta + periods]
+
+
 def trim_and_sort(df: pd.DataFrame, max_rows: int = MAX_PERIODS) -> pd.DataFrame:
     """Sắp các kỳ báo cáo gần nhất lên đầu (nếu nhận ra được cột năm/quý), rồi chỉ giữ
     lại tối đa max_rows kỳ gần nhất. Không rõ cấu trúc cột -> giữ nguyên thứ tự gốc,
-    chỉ cắt bớt để không phình JSON quá mức."""
+    chỉ cắt bớt để không phình JSON quá mức.
+
+    Lưu ý: với bảng dạng 'chỉ tiêu theo dòng, kỳ theo cột' (có cột item_id) thì phải cắt theo CỘT
+    (trim_wide); cắt theo dòng như dưới đây sẽ vứt mất các chỉ tiêu cuối bảng (vd lợi nhuận sau thuế)."""
     if df is None or df.empty:
         return df
+    if "item_id" in df.columns:
+        return trim_wide(df, max_rows)
     year_cols = [c for c in df.columns if "year" in str(c).lower()]
     sort_cols = []
     if year_cols:
