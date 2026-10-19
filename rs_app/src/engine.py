@@ -159,3 +159,48 @@ def ohlcv_for(df: pd.DataFrame, ticker: str, frame: str = "day") -> pd.DataFrame
         agg = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
         g = g.resample("W-FRI").agg({k: v for k, v in agg.items() if k in g.columns}).dropna(subset=["close"])
     return g
+
+
+# ----------------------------------------------------------------------------
+# Chỉ số dòng tiền (Money-flow Weighted Index) — cùng công thức generate_report.compute_index_series
+# ----------------------------------------------------------------------------
+INDEX_SMOOTH_WINDOW = 20
+
+
+def money_flow_index(sub: pd.DataFrame, smooth: int = INDEX_SMOOTH_WINDOW) -> pd.DataFrame:
+    """Chỉ số tổng hợp trọng số dòng tiền cho 1 rổ mã (toàn thị trường / 1 ngành / 1 nhóm), mốc 1000 điểm.
+
+    T_i = SMA(giá × KL, smooth); W_i = T_i / ΣT; %ΔIndex = Σ W_i × %ΔP_i.
+    Open(t) = Close(t-1); High/Low dùng cùng trọng số với %Δ(High/Low so với Close hôm trước).
+    sub cần cột: date, ticker, close, volume (+ high, low nếu có).
+    Trả về DataFrame index=date, cột: open, high, low, close, value (tổng GTGD mỗi phiên, tỷ đồng).
+    """
+    close = sub.pivot(index="date", columns="ticker", values="close").sort_index()
+    vol = sub.pivot(index="date", columns="ticker", values="volume").sort_index()
+    filled = close.ffill()
+    prev = filled.shift(1)
+    pct = filled.pct_change(fill_method=None)
+    raw = close * vol
+    smoothed = raw.rolling(window=smooth, min_periods=1).mean()
+    valid = pct.notna() & smoothed.notna() & (smoothed > 0)
+    t = smoothed.where(valid)
+    w = t.div(t.sum(axis=1), axis=0)  # mã thiếu dữ liệu ngày nào thì bị loại khỏi trọng số ngày đó
+
+    idx_close = 1000.0 * (1.0 + (w * pct).sum(axis=1)).cumprod()
+    idx_open = idx_close.shift(1).fillna(1000.0)
+    if {"high", "low"} <= set(sub.columns):
+        hi = sub.pivot(index="date", columns="ticker", values="high").sort_index()
+        lo = sub.pivot(index="date", columns="ticker", values="low").sort_index()
+        idx_high = idx_open * (1.0 + (w * ((hi - prev) / prev).fillna(0.0)).sum(axis=1))
+        idx_low = idx_open * (1.0 + (w * ((lo - prev) / prev).fillna(0.0)).sum(axis=1))
+    else:
+        idx_high, idx_low = idx_close.copy(), idx_close.copy()
+    out = pd.DataFrame({
+        "open": idx_open,
+        "high": np.maximum.reduce([idx_high, idx_open, idx_close]),
+        "low": np.minimum.reduce([idx_low, idx_open, idx_close]),
+        "close": idx_close,
+        # giá trong CSV tính theo nghìn đồng -> ×1000 rồi chia 1e9 ra tỷ đồng
+        "value": raw.sum(axis=1, skipna=True) * 1000.0 / 1e9,
+    })
+    return out
