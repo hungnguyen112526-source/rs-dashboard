@@ -9,27 +9,62 @@ from src import auth
 
 CSS = """
 <style>
-/* Màu dùng rgba trung tính -> đẹp trên cả nền sáng lẫn tối */
+/* Phong cách: bo tròn lớn, viền mảnh, bóng mềm, nút dạng viên thuốc, điểm nhấn tím→xanh.
+   Dùng màu trung tính / currentColor để đúng cả nền sáng lẫn tối (màu chủ đạo lấy từ .streamlit/config.toml). */
 .block-container { padding-top: 4.5rem; max-width: 1280px; }
 footer, [data-testid="stDeployButton"] { display: none !important; }
 
-/* Thẻ: st.container(border=True, key="card_...") */
-[class*="st-key-card"] { border-radius: 12px; box-shadow: 0 1px 3px rgba(15,39,66,.10); }
-[data-testid="stMetricValue"] { font-weight: 700; }
-[data-testid="stMetricLabel"] p { opacity: .72; font-size: .85rem; }
+h1, h2, h3 { font-weight: 900 !important; letter-spacing: -.04em !important; }
+h1 { line-height: 1.15 !important; }
 
-.auth-card { background: rgba(127,127,127,.08); border: 1px solid rgba(127,127,127,.28); border-radius: 14px;
-             padding: 1.4rem 1.2rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 2px 8px rgba(15,39,66,.10); }
-.auth-title { font-weight: 800; font-size: 1.25rem; letter-spacing: .02em; }
+/* Thẻ: st.container(border=True, key="card_...") */
+[class*="st-key-card"] {
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, currentColor 11%, transparent) !important;
+  background: color-mix(in srgb, currentColor 3.5%, transparent);
+  box-shadow: 0 30px 60px -38px rgba(40,30,80,.38);
+}
+[data-testid="stMetricValue"] { font-weight: 900; letter-spacing: -.03em; }
+[data-testid="stMetricLabel"] p { opacity: .7; font-size: .85rem; font-weight: 700; }
+
+/* Nút & lựa chọn dạng viên thuốc */
+[data-testid^="stBaseButton-"] { border-radius: 999px !important; font-weight: 800; letter-spacing: -.01em; }
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {
+  box-shadow: 0 8px 18px -8px var(--primary-color, #6A57F2);
+}
+[data-testid="stButtonGroup"] button { border-radius: 999px !important; font-weight: 700; }
+[data-testid="stTextInput"] [data-baseweb="input"] { border-radius: 999px; }
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-radius: 16px; }
+[data-testid="stDataFrame"] { border-radius: 16px; overflow: hidden; }
+[data-testid="stExpander"] details { border-radius: 18px; }
+
+/* Thanh bên: menu trang dạng viên thuốc, trang đang mở được tô nhẹ */
+[data-testid="stSidebar"] { border-right: 1px solid color-mix(in srgb, currentColor 9%, transparent); }
+[data-testid="stSidebarNavLink"] { border-radius: 999px; font-weight: 700; }
+[data-testid="stSidebarNavLink"][aria-current="page"] { background: rgba(123,97,255,.16); font-weight: 800; }
+
+.auth-card { background: color-mix(in srgb, currentColor 4%, transparent); border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+             border-radius: 24px; padding: 1.4rem 1.2rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 30px 60px -38px rgba(40,30,80,.38); }
+.auth-title { font-weight: 900; font-size: 1.3rem; letter-spacing: -.02em; }
 .auth-sub { opacity: .7; font-size: .88rem; margin-top: .2rem; }
-.hint-box { background: rgba(127,127,127,.08); border: 1px dashed rgba(127,127,127,.4); border-radius: 8px;
-            padding: .7rem .9rem; font-size: .85rem; opacity: .9; }
+.hint-box { background: color-mix(in srgb, currentColor 4%, transparent); border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
+            border-radius: 14px; padding: .7rem .9rem; font-size: .85rem; opacity: .9; }
 .asof { opacity: .7; font-size: .85rem; margin-bottom: .4rem; }
 
-.auth-logo { width: 54px; height: 54px; margin: 0 auto .6rem; border-radius: 14px; display: flex; align-items: center;
-             justify-content: center; font-size: 1.7rem; background: linear-gradient(135deg,#1d4ed8,#3b82f6); box-shadow: 0 4px 12px rgba(29,78,216,.35); }
+.auth-logo { width: 54px; height: 54px; margin: 0 auto .6rem; border-radius: 18px; display: flex; align-items: center;
+             justify-content: center; font-size: 1.7rem; background: linear-gradient(120deg,#7B61FF,#3D8BFF 55%,#1FB89A);
+             box-shadow: 0 10px 24px -10px rgba(123,97,255,.7); }
 .auth-head { text-align: center; margin-bottom: .6rem; }
 .auth-foot { text-align: center; font-size: .75rem; opacity: .55; margin-top: .8rem; }
+
+/* Hiệu ứng xuất hiện nhẹ cho tiêu đề và thẻ (backwards: không đè lên hiệu ứng mờ khi app đang chạy lại) */
+@keyframes ux-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+[data-testid="stMain"] h1 { animation: ux-rise .7s cubic-bezier(.2,.8,.2,1) backwards; }
+[class*="st-key-card"] { animation: ux-rise .8s cubic-bezier(.2,.8,.2,1) .08s backwards; }
+@media (prefers-reduced-motion: reduce) {
+  [data-testid="stMain"] h1, [class*="st-key-card"] { animation: none; }
+}
 
 /* ---- Điện thoại ---- */
 @media (max-width: 640px) {
@@ -41,7 +76,7 @@ footer, [data-testid="stDeployButton"] { display: none !important; }
       min-width: calc(50% - .5rem) !important; flex: 1 1 calc(50% - .5rem) !important; }
   [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
   [data-testid="stMetricLabel"] p { font-size: .78rem; }
-  [class*="st-key-card"] { border-radius: 10px; }
+  [class*="st-key-card"] { border-radius: 18px; }
 }
 </style>
 """
@@ -248,7 +283,7 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
         fig.add_trace(go.Scatter(x=ohlcv.index, y=ohlcv["ma5"], mode="lines", name="TB5",
                                  line=dict(color="#f59e0b", width=1.4)), row=2, col=1)
         fig.add_trace(go.Scatter(x=ohlcv.index, y=ohlcv["ma20"], mode="lines", name="TB20",
-                                 line=dict(color="#2563eb", width=1.4)), row=2, col=1)
+                                 line=dict(color="#7B61FF", width=1.4)), row=2, col=1)
     fig.update_layout(title=title, height=460, showlegend=has_vol, margin=dict(l=10, r=10, t=40, b=10),
                       legend=dict(orientation="h", y=-0.02, x=1, xanchor="right"),
                       xaxis_rangeslider_visible=False)
