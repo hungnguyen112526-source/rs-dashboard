@@ -1,605 +1,302 @@
-"""Các trang còn lại của bản Streamlit: Tin tức, Dòng tiền, BCTC, Vĩ mô.
-
-Mỗi hàm render_* nhận dữ liệu đã nạp sẵn và tự vẽ trang. Dữ liệu JSON (news_data.json, financials_data.json,
-macro_data.json, bond_yields.json) vẫn do GitHub Actions cập nhật như cũ; app chỉ đọc file.
-"""
-import json
-import re
+"""RS Dashboard (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
+import sys
+from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
 
-from src import engine, ui
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-ROOT = Path(__file__).resolve().parent.parent  # thư mục rs_app/
-GREEN, RED, BLUE, AMBER = "#16a34a", "#dc2626", "#7B61FF", "#f59e0b"
-GRID = "rgba(128,128,128,.18)"
+from src import auth, engine, pages_extra, ui  # noqa: E402
 
+st.set_page_config(page_title="RS Dashboard", page_icon="📈", layout="wide", initial_sidebar_state="auto")
+ui.apply_css()
 
-# ----------------------------------------------------------------------------
-# Tiện ích chung
-# ----------------------------------------------------------------------------
-def find_file(name: str) -> Path | None:
-    """Tìm file dữ liệu trong rs_app/ hoặc thư mục cha (gốc repo)."""
+auth.ensure_admin()
+auth.init_session()
+if not st.session_state.get("authenticated"):
+    ui.render_auth_portal()
+    st.stop()
+
+user = st.session_state["user"]
+is_admin = user.get("role") == "admin"
+
+# ---- Dữ liệu ----
+def _find_data() -> Path | None:
     for base in (ROOT, ROOT.parent):
-        p = base / name
+        p = base / "gia_lich_su_rs.csv"
         if p.exists():
             return p
     return None
 
 
-@st.cache_resource(show_spinner="Đang nạp dữ liệu...")
-def _load_json(path_str: str, mtime: float):
-    with open(path_str, encoding="utf-8") as f:
-        return json.load(f)
+@st.cache_data(ttl=600, show_spinner="Đang nạp dữ liệu giá...")
+def load_all(path_str: str, mtime: float):
+    df = engine.load_prices(path_str)
+    stocks, vnindex = engine.split_index(df)
+    return stocks, vnindex
 
 
-def load_json(name: str):
-    """Đọc JSON (cache theo thời điểm sửa file). Trả None nếu thiếu/hỏng."""
-    p = find_file(name)
-    if p is None:
-        return None
-    try:
-        return _load_json(str(p), p.stat().st_mtime)
-    except Exception as e:  # file hỏng giữa chừng khi Actions đang ghi
-        st.error(f"Không đọc được {name}: {type(e).__name__}")
-        return None
+data_path = _find_data()
+if data_path is None:
+    st.error("Không tìm thấy gia_lich_su_rs.csv (đặt cạnh app.py hoặc ở thư mục gốc của repo).")
+    st.stop()
+MTIME = data_path.stat().st_mtime
+stocks, vnindex = load_all(str(data_path), MTIME)
+as_of = f"{stocks['date'].max():%d/%m/%Y}"
+
+# ---- Sidebar: chỉ còn người dùng + Thoát + mốc dữ liệu ----
+with st.sidebar:
+    c1, c2 = st.columns([3, 2])
+    c1.markdown(f"👤 **{user.get('fullname', user['username'])}**")
+    c1.caption("👑 Quản trị" if is_admin else "⭐ Thành viên")
+    if c2.button("🚪 Thoát", width="stretch"):
+        auth.logout()
+    st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
 
 
-def _missing(name: str, workflow: str):
-    st.warning(f"Chưa có dữ liệu **{name}**. Chạy workflow **{workflow}** trên GitHub Actions để tạo file này.")
+@st.cache_data(ttl=600)
+def cached_rs(path_str: str, mtime: float, frame: str):
+    s, _ = load_all(path_str, mtime)
+    scores = engine.compute_rs(s, frame)
+    return scores, engine.industry_rs(scores)
 
 
-_PUNCT = re.compile(r"([!-/:-@\[-`{-~])")
+@st.cache_data(ttl=600)
+def cached_vol(path_str: str, mtime: float, hour_bucket: str):
+    s, _ = load_all(path_str, mtime)
+    scores, _ = cached_rs(path_str, mtime, "day")
+    rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
+    return engine.volume_screen(s, rs_map)
 
 
-def _md(s) -> str:
-    """Escape mọi ký tự dấu câu ASCII để dữ liệu ngoài (RSS) không bị hiểu thành markdown/LaTeX."""
-    return _PUNCT.sub(r"\\\1", "" if s is None else str(s))
-
-
-def _safe_url(u) -> str | None:
-    try:
-        p = urlparse(str(u or ""))
-    except ValueError:
-        return None
-    if p.scheme not in ("http", "https") or not p.netloc:
-        return None
-    return (str(u).replace(" ", "%20").replace("(", "%28").replace(")", "%29")
-            .replace("<", "%3C").replace(">", "%3E"))
-
-
-def _fmt_num(v) -> str:
-    if v is None or pd.isna(v):
-        return "–"
-    a = abs(v)
-    if a >= 1e9:
-        return f"{v / 1e9:,.2f} tỷ"
-    if a >= 1e6:
-        return f"{v / 1e6:,.2f} triệu"
-    if a >= 1000:
-        return f"{v:,.1f}"
-    if a >= 10:
-        return f"{v:,.2f}"
-    return f"{v:,.4f}"  # tỷ giá (EUR/USD...) cần nhiều số lẻ
-
-
-def _pct(a, b) -> str:
-    if a is None or b in (None, 0) or pd.isna(a) or pd.isna(b):
-        return "–"
-    return f"{(a / b - 1) * 100:+.2f}%"
-
-
-def _style_axes(fig: go.Figure, weekend_gaps: bool = True):
-    fig.update_xaxes(gridcolor=GRID, **({"rangebreaks": [dict(bounds=["sat", "mon"])]} if weekend_gaps else {}))
-    fig.update_yaxes(gridcolor=GRID)
-
-
-def _clip_years(df: pd.DataFrame, label: str) -> pd.DataFrame:
-    years = {"1N": 1, "3N": 3, "5N": 5, "10N": 10}.get(label)
-    if years is None or df.empty:
-        return df
-    return df[df.index >= df.index.max() - pd.DateOffset(years=years)]
-
-
-# ----------------------------------------------------------------------------
-# 📰 Tin tức
-# ----------------------------------------------------------------------------
-NEWS_PAGE = 30
-
-
-def render_news(news):
-    st.header("📰 Tin tức tổng hợp")
-    if not news or not news.get("articles"):
-        _missing("news_data.json", "Cập nhật tin tức (update_news)")
+# ---- Biểu đồ trong cửa sổ nổi ----
+def show_chart(ticker: str, key: str):
+    frame = st.radio("Khung biểu đồ", ["Ngày", "Tuần"], horizontal=True, key=f"{key}_tf")
+    ohlcv = engine.ohlcv_for(stocks, ticker, "week" if frame == "Tuần" else "day")
+    if ohlcv.empty:
+        st.info("Không có dữ liệu giá cho mã này.")
         return
-    articles = sorted(news["articles"], key=lambda a: a.get("published_at") or "", reverse=True)
-    cats = news.get("categories") or sorted({a.get("category") for a in articles if a.get("category")})
+    st.plotly_chart(ui.candle_chart(ohlcv, f"{ticker} — {frame}", tail=400 if frame == "Ngày" else 200),
+                    width="stretch")
 
-    st.caption(f"Nguồn: CafeF · Vietstock · Investing.com (RSS công khai) · Cập nhật lần cuối: "
-               f"{news.get('updated_at', '–')} · {len(articles)} bài gần nhất")
-    st.caption("Tag mã (VD `VIC`) được gắn tự động khi tiêu đề/tóm tắt có nhắc mã viết HOA — "
-               "chỉ là gợi ý theo từ khoá, có thể sót hoặc nhầm.")
 
+def open_chart(frame_df: pd.DataFrame, ticker: str, key: str):
+    row = frame_df[frame_df["Mã"] == ticker]
+    info = []
+    if not row.empty:
+        r = row.iloc[0]
+        if pd.notna(r.get("Ngành")):
+            info.append(f"Ngành: {r['Ngành']}")
+        if "RS" in r and pd.notna(r["RS"]):
+            info.append(f"RS: {int(r['RS'])}")
+        if "GTGD TB20 (tỷ)" in r and pd.notna(r["GTGD TB20 (tỷ)"]):
+            info.append(f"GTGD TB20: {r['GTGD TB20 (tỷ)']:,.1f} tỷ")
+
+    @st.dialog(f"📈 {ticker}", width="large")
+    def _dlg():
+        if info:
+            st.caption(" · ".join(info))
+        show_chart(ticker, key)
+
+    _dlg()
+
+
+def table_with_select(frame_df: pd.DataFrame, key: str, display=None, column_config=None):
+    """Bảng + cửa sổ nổi biểu đồ. Chọn mã: tick ô vuông đầu dòng HOẶC dùng ô chọn mã.
+    Chỉ mở cửa sổ khi lựa chọn THAY ĐỔI (tránh bật lại mỗi lần gõ bộ lọc); có nút mở lại."""
+    ss = st.session_state
+    kt, kb, ka = f"{key}_t", f"{key}_b", f"{key}_a"
     c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
-    cat = c1.pills("Chuyên mục", ["Tất cả"] + list(cats), default="Tất cả", key="news_cat") or "Tất cả"
-    q = c2.text_input("Tìm kiếm", placeholder="🔍 Từ khoá hoặc mã (VD: VIC, ngân hàng, Fed...)", key="news_q",
-                      label_visibility="collapsed").strip().lower()
+    pick_box = c1.selectbox("📊 Chọn mã để xem biểu đồ nến", frame_df["Mã"].tolist(), index=None,
+                            placeholder="Gõ hoặc chọn mã...", key=f"{key}_pick")
+    reopen = bool(ss.get(ka)) and c2.button(f"📈 Mở lại biểu đồ {ss.get(ka)}", key=f"{key}_reopen", width="stretch")
+    st.caption("Hoặc **tick ô vuông ở đầu dòng** (cột ngoài cùng bên trái). Bấm vào chữ trong ô thì chưa chọn dòng.")
+    event = st.dataframe(display if display is not None else frame_df, width="stretch", hide_index=True,
+                         key=key, on_select="rerun", selection_mode="single-row", column_config=column_config)
 
-    def hit(a):
-        if cat != "Tất cả" and a.get("category") != cat:
-            return False
-        if not q:
-            return True
-        hay = f"{a.get('title', '')} {a.get('summary', '')} {' '.join(a.get('tickers') or [])}".lower()
-        return q in hay
-
-    rows = [a for a in articles if hit(a)]
-    sig = (cat, q)
-    if st.session_state.get("news_sig") != sig:  # đổi bộ lọc -> quay về trang đầu
-        st.session_state["news_sig"], st.session_state["news_n"] = sig, NEWS_PAGE
-    n = st.session_state.setdefault("news_n", NEWS_PAGE)
-
-    st.caption(f"{len(rows)} bài")
-    if not rows:
-        st.info("Không có bài nào khớp bộ lọc hiện tại.")
-        return
-    for a in rows[:n]:
-        url = _safe_url(a.get("link"))
-        title = _md(a.get("title") or "(không có tiêu đề)")
-        tags = " ".join(f"`{t}`" for t in (a.get("tickers") or []) if re.fullmatch(r"[A-Z0-9]{2,6}", str(t)))
-        meta = " · ".join(x for x in [_md(a.get("source")), _md(a.get("category")), _md(a.get("published_at")), tags] if x)
-        with st.container(border=True):
-            st.markdown(f"**[{title}]({url})**" if url else f"**{title}**")
-            st.caption(meta)
-            if a.get("summary"):
-                summ = str(a["summary"])
-                st.markdown(_md(summ if len(summ) <= 400 else summ[:397] + "..."))
-    if len(rows) > n and st.button(f"⬇️ Xem thêm ({len(rows) - n} bài)", key="news_more", width="stretch"):
-        st.session_state["news_n"] = n + NEWS_PAGE
-        st.rerun()
+    rows = event.selection.rows
+    cur_t = frame_df.iloc[rows[0]]["Mã"] if rows else None
+    active = None
+    if cur_t != ss.get(kt):
+        active = cur_t
+    elif pick_box != ss.get(kb):
+        active = pick_box
+    ss[kt], ss[kb] = cur_t, pick_box
+    if active:
+        ss[ka] = active
+    target = active or (ss.get(ka) if reopen else None)
+    if target:
+        open_chart(frame_df, target, key)
 
 
-# ----------------------------------------------------------------------------
-# 📊 Dòng tiền
-# ----------------------------------------------------------------------------
-FLOW_RANGES = {"3 tháng": 63, "6 tháng": 126, "1 năm": 252, "3 năm": 756, "Tất cả": None}
+def frame_filters(with_near: bool = False, key: str = "f"):
+    """Bộ lọc 1 hàng: khung thời gian · (mã gần đạt) · tìm kiếm."""
+    widths = [2, 3, 3] if with_near else [2, 4]
+    cols = st.columns(widths, vertical_alignment="bottom")
+    frame = cols[0].segmented_control("Khung", ["Ngày", "Tuần"], default="Ngày", key=f"{key}_frame") or "Ngày"
+    near = False
+    if with_near:
+        near = cols[1].toggle("Hiện cả mã gần đạt (3/4 mốc)", key=f"{key}_near",
+                              help="TB5 < TB10 < TB20 nhưng chưa < TB40")
+    q = cols[-1].text_input("Tìm kiếm", placeholder="🔍 Lọc theo mã hoặc ngành", key=f"{key}_q",
+                            label_visibility="collapsed").strip().lower()
+    return frame, near, q
 
 
-@st.cache_data(ttl=600, show_spinner="Đang tính chỉ số dòng tiền...")
-def _flow_cached(path_str: str, mtime: float, kind: str, name: str, _stocks: pd.DataFrame) -> pd.DataFrame:
-    d = _stocks
-    if kind == "Ngành":
-        d = d[d["industry"] == name]
-    elif kind == "Tập đoàn":
-        d = d[d["nhom"] == name]
-    cols = [c for c in ["date", "ticker", "close", "volume", "high", "low"] if c in d.columns]
-    return engine.money_flow_index(d[cols])
+def _match(df: pd.DataFrame, q: str, ind_col: str) -> pd.DataFrame:
+    if not q:
+        return df
+    name = df[ind_col].fillna("").str.lower()
+    if "Mã" in df.columns:
+        return df[df["Mã"].str.lower().str.contains(q) | name.str.contains(q)]
+    return df[name.str.contains(q)]
 
 
-def _flow_chart(idx: pd.DataFrame, mode: str, vn_close: pd.Series | None, title: str) -> go.Figure:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.76, 0.24], vertical_spacing=0.03,
-                        specs=[[{"secondary_y": True}], [{"secondary_y": False}]])
-    if mode == "Nến":
-        fig.add_trace(go.Candlestick(x=idx.index, open=idx["open"], high=idx["high"], low=idx["low"],
-                                     close=idx["close"], name="Chỉ số dòng tiền",
-                                     increasing_line_color=GREEN, decreasing_line_color=RED),
-                      row=1, col=1, secondary_y=False)
-    else:
-        fig.add_trace(go.Scatter(x=idx.index, y=idx["close"], mode="lines", name="Chỉ số dòng tiền",
-                                 line=dict(color=BLUE, width=2)), row=1, col=1, secondary_y=False)
-    if vn_close is not None and not vn_close.empty:
-        fig.add_trace(go.Scatter(x=vn_close.index, y=vn_close.values, mode="lines", name="VNIndex (trục trái)",
-                                 line=dict(color=AMBER, width=1.5, dash="dash")), row=1, col=1, secondary_y=True)
-    fig.add_trace(go.Bar(x=idx.index, y=idx["value"], name="GTGD (tỷ đồng)",
-                         marker_color="rgba(128,128,128,.45)"), row=2, col=1)
-    fig.update_layout(title=title, height=520, margin=dict(l=10, r=10, t=40, b=10), xaxis_rangeslider_visible=False,
-                      legend=dict(orientation="h", y=-0.04, x=1, xanchor="right"), hovermode="x unified")
-    _style_axes(fig)
-    fig.update_yaxes(side="right", row=1, col=1, secondary_y=False, title_text="Điểm")
-    fig.update_yaxes(side="left", row=1, col=1, secondary_y=True, showgrid=False)
-    fig.update_yaxes(title_text="Tỷ đồng", row=2, col=1)
-    return fig
-
-
-def render_flow(stocks: pd.DataFrame, vnindex: pd.DataFrame, path_str: str, mtime: float):
-    st.header("📊 Chỉ số dòng tiền")
-    if "volume" not in stocks.columns or stocks["volume"].dropna().empty:
-        st.warning("Dữ liệu giá chưa có cột khối lượng nên không tính được chỉ số dòng tiền.")
+# ---------------------------------------------------------------------------
+def page_rs():
+    st.header("🏆 Xếp hạng sức mạnh giá (RS)")
+    frame_ui, _, q = frame_filters(key="rs")
+    frame = "week" if frame_ui == "Tuần" else "day"
+    scores, ind = cached_rs(str(data_path), MTIME, frame)
+    if scores.empty:
+        st.warning("Không đủ dữ liệu để tính RS ở khung này.")
         return
 
-    industries = sorted(stocks["industry"].dropna().unique())
-    groups = sorted(stocks["nhom"].dropna().unique()) if "nhom" in stocks.columns else []
-    kinds = ["Toàn thị trường", "Ngành"] + (["Tập đoàn"] if groups else [])
-
-    c1, c2, c3 = st.columns([3, 3, 2], vertical_alignment="bottom")
-    kind = c1.segmented_control("Rổ cổ phiếu", kinds, default="Toàn thị trường", key="flow_kind") or "Toàn thị trường"
-    if kind == "Toàn thị trường":
-        name = "Toàn thị trường"
-    else:
-        options = industries if kind == "Ngành" else groups
-        name = c2.selectbox(kind, options, key=f"flow_name_{kind}")
-    mode = c3.segmented_control("Kiểu biểu đồ", ["Đường", "Nến"], default="Đường", key="flow_mode") or "Đường"
-
-    c4, c5 = st.columns([3, 2], vertical_alignment="bottom")
-    rng = c4.segmented_control("Khoảng thời gian", list(FLOW_RANGES), default="1 năm", key="flow_rng") or "1 năm"
-    show_vn = c5.toggle("Hiện VNIndex thực (trục phụ)", value=not vnindex.empty, key="flow_vn", disabled=vnindex.empty)
-
-    idx = _flow_cached(path_str, mtime, kind, name, stocks)
-    if idx.empty:
-        st.info("Không có dữ liệu cho rổ này.")
-        return
-    close = idx["close"]
+    top = ind.iloc[0]
     ui.kpi_row([
-        ("Chỉ số hiện tại", f"{close.iloc[-1]:,.1f}", f"Mốc 1000 điểm tại {idx.index[0]:%d/%m/%Y}"),
-        ("So với phiên trước", _pct(close.iloc[-1], close.iloc[-2]) if len(close) > 1 else "–", None),
-        ("So với 1 tháng trước", _pct(close.iloc[-1], close.iloc[-22]) if len(close) > 22 else "–", "22 phiên"),
-        ("So với 1 năm trước", _pct(close.iloc[-1], close.iloc[-251]) if len(close) > 251 else "–", "250 phiên"),
+        ("Mã được xếp hạng", f"{len(scores)}", "Mã đủ dữ liệu (≥ 120 phiên) để tính RS"),
+        ("Số ngành", f"{len(ind)}", None),
+        ("Ngành mạnh nhất", str(top["industry"]), f"RS ngành {int(top['RS_nganh'])}"),
+        ("Mã RS ≥ 90", f"{int((scores['RS'] >= 90).sum())}", f"Dữ liệu đến {as_of}"),
     ])
 
-    n = FLOW_RANGES[rng]
-    view = idx.tail(n) if n else idx
-    vn_close = None
-    if show_vn and not vnindex.empty:
-        vn_close = vnindex.sort_values("date").set_index("date")["close"].loc[view.index.min():]
-    with st.container(border=True, key="card_flow_chart"):
-        st.plotly_chart(_flow_chart(view, mode, vn_close, f"{name} — chỉ số dòng tiền"), width="stretch")
+    unit = "tuần" if frame == "week" else "phiên"
+    size = engine.WEEKLY_BLOCK_SIZE if frame == "week" else engine.BLOCK_SIZE
+    with st.container(border=True, key="card_rs_table"):
+        st.caption("Điểm thô = 0.4×%Δ(khối gần nhất) + 0.3×%Δ(khối kế) + 0.2×%Δ(khối kế nữa) + 0.1×%Δ(khối xa nhất). "
+                   "RS = thứ hạng quy đổi thang 1–99.")
+        tab_stock, tab_ind = st.tabs(["Cổ phiếu", "Ngành"])
+        with tab_stock:
+            view = scores.rename(columns={"ticker": "Mã", "industry": "Ngành", "raw_score": "Điểm thô"}).copy()
+            for i in range(1, 5):
+                view = view.rename(columns={f"pct_block{i}": f"Khối {i} ({size} {unit}) %"})
+            view = _match(view, q, "Ngành")
+            view = view[["Mã", "Ngành"] + [c for c in view.columns if c.startswith("Khối")] + ["Điểm thô", "RS"]]
+            view = view.reset_index(drop=True)
+            st.caption(f"{len(view)} mã")
+            if view.empty:
+                st.info("Không có mã nào khớp bộ lọc.")
+            else:
+                table_with_select(view, f"rs_tbl_{frame}", display=ui.style_rs(view),
+                                  column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
+        with tab_ind:
+            v = ind.rename(columns={"industry": "Ngành", "raw_score": "Điểm thô ngành",
+                                    "RS_nganh": "RS ngành", "so_ma": "Số mã"})
+            v = _match(v, q, "Ngành").reset_index(drop=True)
+            st.dataframe(v.style.apply(ui._zebra, axis=None).format({"Điểm thô ngành": "{:.2f}"}),
+                         width="stretch", hide_index=True,
+                         column_config={"RS ngành": st.column_config.ProgressColumn("RS ngành", min_value=1,
+                                                                                    max_value=99, format="%d")})
 
-    with st.expander("📖 Chỉ số này tính thế nào?"):
+
+# ---------------------------------------------------------------------------
+def page_vol():
+    st.header("📉 Lọc cổ phiếu có khối lượng giao dịch giảm dần")
+    now = datetime.now(engine.VN_TZ)
+    day_df, week_df, last_d, last_w = cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+
+    def _n(df, n):
+        return int((df["Số mốc đạt"] == n).sum()) if len(df) else 0
+
+    ui.kpi_row([
+        ("Mã đủ 4 mốc · Ngày", f"{_n(day_df, 4)}", f"Tính đến {last_d}" if last_d else None),
+        ("Mã đủ 4 mốc · Tuần", f"{_n(week_df, 4)}", f"Tính đến {last_w}" if last_w else None),
+        ("Mã gần đạt (3/4) · Ngày", f"{_n(day_df, 3)}", "TB5 < TB10 < TB20 nhưng chưa < TB40"),
+        ("Dữ liệu đến", as_of, None),
+    ])
+
+    with st.expander("📖 Bộ lọc này làm gì? Cách đọc kết quả"):
         st.markdown(
-            f"- Mốc khởi điểm **1000 điểm** tại phiên đầu tiên có dữ liệu.\n"
-            f"- Trọng số mỗi mã = SMA({engine.INDEX_SMOOTH_WINDOW} phiên) của giá trị giao dịch (giá × khối lượng) — "
-            f"đã làm mượt để giảm nhiễu; mã thiếu dữ liệu ngày nào bị loại khỏi trọng số ngày đó.\n"
-            f"- %Δ chỉ số = Σ (trọng số × %Δ giá từng mã).\n"
-            f"- Chế độ nến: Mở(t) = Đóng(t-1); High/Low tổng hợp theo cùng trọng số dòng tiền.\n"
-            f"- Cột xám bên dưới = tổng giá trị giao dịch mỗi phiên (tỷ đồng). Đây là công cụ tham khảo, "
-            f"không phải tín hiệu mua/bán."
+            "- **Ý nghĩa:** tìm cổ phiếu có lượng khớp lệnh đang co hẹp dần (thường gặp khi tích luỹ/đi ngang). "
+            "Đây là công cụ sàng lọc, **không phải tín hiệu mua/bán**.\n"
+            "- **Điều kiện:** KLGD trung bình 5 < 10 < 20 < 40 (phiên với khung Ngày, tuần với khung Tuần; "
+            "KLGD tuần = tổng các phiên trong tuần kết thúc thứ Sáu).\n"
+            "- **Số mốc đạt:** 4/4 = đạt đủ (mặc định hiển thị); 3/4 = mới đạt TB5<TB10<TB20, chưa < TB40.\n"
+            "- **% TB5 so với TB40:** càng đỏ đậm thì khối lượng càng cạn.\n"
+            "- **GTGD TB20 (tỷ):** giá trị giao dịch TB 20 phiên, chỉ để tham khảo thanh khoản — không dùng để lọc.\n"
+            "- Phiên/tuần đang diễn ra không được tính."
         )
 
-
-# ----------------------------------------------------------------------------
-# 📑 Báo cáo tài chính
-# ----------------------------------------------------------------------------
-FIN_LABELS = {"income_statement": "Kết quả kinh doanh", "balance_sheet": "Cân đối kế toán",
-              "cash_flow": "Lưu chuyển tiền tệ", "ratio": "Chỉ số tài chính"}
-_META = ("item", "item_en", "item_id")
-_HIDE_IDS = {"year", "quarter", "ratioTTMId", "ratioType"}  # dòng kỹ thuật của bảng chỉ số
-
-
-def _fin_frame(table: dict, key: str, in_billions: bool):
-    """Bảng BCTC dạng (chỉ tiêu × kỳ). Trả (DataFrame hiển thị, danh sách cột kỳ) hoặc (None, [])."""
-    if not table or not table.get("columns") or not table.get("rows"):
-        return None, []
-    df = pd.DataFrame(table["rows"], columns=table["columns"])
-    if "item" not in df.columns:
-        return None, []
-    if "item_id" in df.columns:
-        df = df[~df["item_id"].isin(_HIDE_IDS)]
-    periods = sorted((c for c in df.columns if c not in _META), reverse=True)  # kỳ mới nhất bên trái
-    if not periods or df.empty:
-        return None, []
-    df = df.copy()
-    df[periods] = df[periods].apply(pd.to_numeric, errors="coerce")
-    unit = []
-    for i, row in df.iterrows():
-        vals = row[periods].astype(float)
-        big = vals.abs().max() >= 1e6
-        is_money = big if key != "ratio" else (row.get("item_id") == "market_cap")
-        if is_money and in_billions:
-            df.loc[i, periods] = vals / 1e9
-            unit.append("tỷ đồng")
-        else:
-            unit.append("đồng" if is_money else "")
-    out = pd.DataFrame({"Chỉ tiêu": df["item"].values, "Đơn vị": unit})
-    for p in periods:
-        out[p] = df[p].values
-    return out, periods
-
-
-def _fin_fmt(v) -> str:
-    if v is None or pd.isna(v):
-        return "–"
-    a = abs(v)
-    if a >= 1e6:
-        return f"{v:,.0f}"
-    if a >= 1000:
-        return f"{v:,.1f}"
-    return f"{v:,.2f}"
-
-
-def render_fin(fin, industry_map: dict):
-    st.header("📑 Báo cáo tài chính")
-    tickers = (fin or {}).get("tickers") or {}
-    if not tickers:
-        _missing("financials_data.json", "Cập nhật báo cáo tài chính (update_financials)")
-        return
-    period_label = "quý" if fin.get("period", "quarter") == "quarter" else "năm"
-    st.caption(f"Nguồn: vnstock (VCI) · Theo {period_label} · Cập nhật lần cuối: {fin.get('updated_at', '–')}")
-
-    c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
-    ticker = c1.selectbox("Mã cổ phiếu", sorted(tickers), key="fin_ticker",
-                          format_func=lambda t: f"{t} · {industry_map.get(t) or 'Khác'}")
-    unit_choice = c2.segmented_control("Đơn vị tiền", ["Tỷ đồng", "Đồng (gốc)"], default="Tỷ đồng",
-                                       key="fin_unit") or "Tỷ đồng"
-    in_billions = unit_choice == "Tỷ đồng"
-
-    data = tickers[ticker]
-    tabs = st.tabs(list(FIN_LABELS.values()))
-    for tab, (key, label) in zip(tabs, FIN_LABELS.items()):
-        with tab:
-            frame, periods = _fin_frame(data.get(key), key, in_billions)
-            if frame is None:
-                st.info("Không có dữ liệu báo cáo này cho mã đã chọn.")
-                continue
-            styler = frame.style.apply(ui._zebra, axis=None).format(_fin_fmt, subset=periods, na_rep="–")
-            st.caption(f"{len(frame)} chỉ tiêu · {len(periods)} {period_label}")
-            st.dataframe(styler, hide_index=True, width="stretch", height=min(36 * (len(frame) + 1) + 3, 720),
-                         column_config={"Chỉ tiêu": st.column_config.TextColumn("Chỉ tiêu", pinned=True, width="large"),
-                                        "Đơn vị": st.column_config.TextColumn("Đơn vị", width="small")})
-
-
-# ----------------------------------------------------------------------------
-# 🌐 Vĩ mô
-# ----------------------------------------------------------------------------
-MACRO_RANGES = ["1N", "3N", "5N", "10N", "Tất cả"]
-FED_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#a78bfa", "#f472b6"]
-
-
-def _series_df(entry: dict) -> tuple[pd.DataFrame, bool]:
-    vals = entry.get("values") or []
-    ohlc = any(len(v) >= 5 for v in vals)
-    if ohlc:
-        df = pd.DataFrame([v[:5] for v in vals if len(v) >= 5], columns=["date", "open", "high", "low", "close"])
-    else:
-        df = pd.DataFrame([v[:2] for v in vals if len(v) >= 2 and v[1] is not None], columns=["date", "close"])
-    if df.empty:
-        return df, ohlc
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    return df.dropna(subset=["date", "close"]).set_index("date").sort_index(), ohlc
-
-
-def _bond_card(bonds):
-    with st.container(border=True, key="card_macro_bond"):
-        st.subheader("🏦 Lợi suất trái phiếu chính phủ 30 năm")
-        series = (bonds or {}).get("series") or {}
-        if not series:
-            _missing("bond_yields.json", "Cập nhật dữ liệu (update_data)")
+    frame_ui, show_near, q = frame_filters(with_near=True, key="vol")
+    is_week = frame_ui == "Tuần"
+    data = week_df if is_week else day_df
+    last = last_w if is_week else last_d
+    unit = "tuần" if is_week else "phiên"
+    with st.container(border=True, key="card_vol_table"):
+        if last:
+            st.markdown(f'<div class="asof">Tính đến {unit} kết thúc ngày {last} (không tính {unit} đang diễn ra).</div>',
+                        unsafe_allow_html=True)
+        if data.empty:
+            st.info("Không có mã nào thỏa điều kiện.")
             return
-        st.caption(f"Nguồn: TradingView (TVC) · dữ liệu theo tuần · Cập nhật lần cuối: {bonds.get('updated_at', '–')}")
-        labels = {k: v.get("label", k) for k, v in series.items()}
-        c1, c2 = st.columns([4, 2], vertical_alignment="bottom")
-        picked = c1.multiselect("Quốc gia", list(labels), default=list(labels), format_func=labels.get,
-                                key="macro_bond_pick")
-        rng = c2.segmented_control("Khoảng", MACRO_RANGES, default="5N", key="macro_bond_rng") or "5N"
-        fig, rows = go.Figure(), []
-        for k in picked:
-            d = pd.DataFrame(series[k].get("data") or [], columns=["date", "y"])
-            if d.empty:
-                continue
-            d["date"] = pd.to_datetime(d["date"], errors="coerce")
-            d = d.dropna().set_index("date").sort_index()
-            rows.append({"Quốc gia": labels[k], "Lợi suất (%)": d["y"].iloc[-1],
-                         "Thay đổi 4 tuần (điểm %)": d["y"].iloc[-1] - d["y"].iloc[-5] if len(d) > 4 else None,
-                         "Ngày": d.index[-1].strftime("%d/%m/%Y")})
-            d = _clip_years(d, rng)
-            fig.add_trace(go.Scatter(x=d.index, y=d["y"], mode="lines", name=labels[k], line=dict(width=1.8)))
-        if not rows:
-            st.info("Chọn ít nhất một quốc gia.")
+        if not show_near:
+            data = data[data["Số mốc đạt"] >= 4]
+        data = _match(data, q, "Ngành")
+        data = data.sort_values("% TB5 so với TB40").reset_index(drop=True)
+        st.caption(f"{len(data)} mã")
+        if data.empty:
+            st.info("Không có mã nào khớp bộ lọc.")
             return
-        fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified",
-                          yaxis_title="%", legend=dict(orientation="h", y=-0.12))
-        _style_axes(fig, weekend_gaps=False)
-        st.plotly_chart(fig, width="stretch")
-        tbl = pd.DataFrame(rows).sort_values("Lợi suất (%)", ascending=False)
-        st.dataframe(tbl.style.format({"Lợi suất (%)": "{:.3f}", "Thay đổi 4 tuần (điểm %)": "{:+.3f}"}, na_rep="–"),
-                     hide_index=True, width="stretch")
+        cols = ["Mã", "Ngành", "RS", "TB5", "TB10", "TB20", "TB40", "% TB5 so với TB40", "Số mốc đạt", "GTGD TB20 (tỷ)"]
+        data = data[[c for c in cols if c in data.columns]]
+        table_with_select(data, f"vol_tbl_{'w' if is_week else 'd'}_{int(show_near)}",
+                          display=ui.style_volume(data),
+                          column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
 
 
-def _vnindex_card(vnindex: pd.DataFrame):
-    if vnindex.empty:
-        return
-    with st.container(border=True, key="card_macro_vnindex"):
-        st.subheader("📈 VN-Index")
-        c = vnindex.sort_values("date")["close"].astype(float)
-        summary = f"{c.iloc[-1]:,.2f} ({_pct(c.iloc[-1], c.iloc[-2])} so với phiên trước)" if len(c) > 1 else f"{c.iloc[-1]:,.2f}"
-        st.caption(f"Nguồn: dữ liệu giá của dashboard · nến + khối lượng · Đóng cửa gần nhất: {summary}")
-        frame = st.segmented_control("Khung", ["Ngày", "Tuần"], default="Ngày", key="macro_vn_frame") or "Ngày"
-        ohlcv = engine.ohlcv_for(vnindex, "VNINDEX", "week" if frame == "Tuần" else "day")
-        if ohlcv.empty:
-            st.info("Không có dữ liệu nến cho VN-Index.")
-            return
-        st.plotly_chart(ui.candle_chart(ohlcv, f"VN-Index — {frame}", tail=400 if frame == "Ngày" else 200),
-                        width="stretch")
+# ---------------------------------------------------------------------------
+# Các trang còn lại (logic nằm trong src/pages_extra.py)
+# ---------------------------------------------------------------------------
+def page_news():
+    pages_extra.render_news(pages_extra.load_json("news_data.json"))
 
 
-def _indicator_card(macro: dict):
-    series, groups = macro.get("series") or {}, macro.get("groups") or {}
-    with st.container(border=True, key="card_macro_detail"):
-        st.subheader("🌐 Xem chi tiết 1 chỉ số")
-        st.caption(f"Nguồn: FRED (Mỹ) · World Bank (VN) · yfinance (tỷ giá & hàng hoá) · "
-                   f"Cập nhật lần cuối: {macro.get('updated_at', '–')}")
-        group_names = [g for g, ks in groups.items() if any(k in series for k in ks)] or sorted(
-            {s.get("group", "Khác") for s in series.values()})
-        c1, c2, c3 = st.columns([2, 3, 2], vertical_alignment="bottom")
-        group = c1.selectbox("Nhóm", group_names, key="macro_group")
-        keys = [k for k in groups.get(group, []) if k in series] or [k for k, s in series.items() if s.get("group") == group]
-        key = c2.selectbox("Chỉ số", keys, format_func=lambda k: series[k].get("label", k), key=f"macro_key_{group}")
-        rng = c3.segmented_control("Khoảng", MACRO_RANGES, default="Tất cả", key="macro_rng") or "Tất cả"
-        if not key:
-            return
-        entry = series[key]
-        df, ohlc = _series_df(entry)
-        if df.empty:
-            st.info("Chỉ số này chưa có dữ liệu.")
-            return
-        last = df["close"].iloc[-1]
-        prev = df["close"].iloc[-2] if len(df) > 1 else None
-        freq = {"daily": "Ngày", "monthly": "Tháng", "yearly": "Năm", "quarterly": "Quý"}.get(entry.get("freq"), "–")
-        ui.kpi_row([
-            ("Giá trị mới nhất", _fmt_num(last), None),
-            ("Kỳ dữ liệu", df.index[-1].strftime("%d/%m/%Y"), f"Tần suất: {freq}"),
-            ("So với kỳ trước", _pct(last, prev) if prev else "–", None),
-            ("Số điểm dữ liệu", f"{len(df):,}", None),
-        ])
-        view = _clip_years(df, rng)
-        fig = go.Figure()
-        if ohlc:
-            fig.add_trace(go.Candlestick(x=view.index, open=view["open"], high=view["high"], low=view["low"],
-                                         close=view["close"], name=entry.get("label", key),
-                                         increasing_line_color=GREEN, decreasing_line_color=RED))
-        elif entry.get("freq") == "yearly":
-            fig.add_trace(go.Bar(x=view.index.year, y=view["close"], name=entry.get("label", key), marker_color=BLUE))
-        else:
-            fig.add_trace(go.Scatter(x=view.index, y=view["close"], mode="lines", name=entry.get("label", key),
-                                     line=dict(color=BLUE, width=2)))
-        fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False,
-                          showlegend=False, hovermode="x unified")
-        _style_axes(fig, weekend_gaps=False)
-        st.plotly_chart(fig, width="stretch")
-        if entry.get("description"):
-            st.caption(entry["description"])
+def page_flow():
+    pages_extra.render_flow(stocks, vnindex, str(data_path), MTIME)
 
 
-def _fed_card(macro: dict):
-    proj = macro.get("fed_projections") or {}
-    if not proj:
-        return
-    with st.container(border=True, key="card_macro_fed"):
-        st.subheader("🏛️ Dự báo kinh tế của Fed (Summary of Economic Projections)")
-        st.caption("Mỗi lần họp FOMC (thường 4 lần/năm: tháng 3, 6, 9, 12) Fed công bố một bộ dự báo mới — "
-                   "biểu đồ so sánh các lần công bố gần nhất để thấy dự báo đang thay đổi ra sao.")
-        cols = st.columns(len(proj))
-        for col, (k, entry) in zip(cols, proj.items()):
-            vint = entry.get("vintages") or []
-            if not vint:
-                continue
-            years = sorted({y for v in vint for y in v.get("data", {})})
-            fig = go.Figure()
-            for i, v in enumerate(vint):
-                fig.add_trace(go.Bar(x=years, y=[v["data"].get(y) for y in years], name=v.get("vintage", ""),
-                                     marker_color=FED_COLORS[i % len(FED_COLORS)]))
-            fig.update_layout(barmode="group", height=320, margin=dict(l=10, r=10, t=10, b=10),
-                              legend=dict(orientation="h", y=-0.15), yaxis_title="%")
-            _style_axes(fig, weekend_gaps=False)
-            with col:
-                st.markdown(f"**{entry.get('label', k)}**")
-                st.plotly_chart(fig, width="stretch", key=f"fed_{k}")
-                st.caption("Nguồn: FOMC Summary of Economic Projections, qua FRED")
+def page_fin():
+    ind_map = stocks.drop_duplicates("ticker").set_index("ticker")["industry"].to_dict()
+    pages_extra.render_fin(pages_extra.load_json("financials_data.json"), ind_map)
 
 
-def render_macro(macro, bonds, vnindex: pd.DataFrame):
-    st.header("🌐 Dữ liệu vĩ mô")
-    _bond_card(bonds)
-    _vnindex_card(vnindex)
-    if macro and macro.get("series"):
-        _indicator_card(macro)
-        _fed_card(macro)
-    else:
-        _missing("macro_data.json", "Cập nhật dữ liệu (update_data)")
+def page_macro():
+    pages_extra.render_macro(pages_extra.load_json("macro_data.json"),
+                             pages_extra.load_json("bond_yields.json"), vnindex)
 
 
-# ----------------------------------------------------------------------------
-# 📅 Lịch kinh tế
-# ----------------------------------------------------------------------------
-VN_TZ_NAME = "Asia/Ho_Chi_Minh"
-WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật"]
-COUNTRY_NAMES = {"VN": "Việt Nam", "US": "Mỹ", "CN": "Trung Quốc", "EU": "Khu vực euro", "JP": "Nhật Bản",
-                 "GB": "Anh", "DE": "Đức", "KR": "Hàn Quốc"}
-IMPORTANCE = {1: "🔴 Cao", 0: "🟠 Trung bình", -1: "⚪ Thấp"}
-CAL_RANGES = ["Hôm nay", "Ngày mai", "7 ngày tới", "30 ngày tới", "7 ngày qua"]
+def page_calendar():
+    pages_extra.render_calendar(pages_extra.load_json("calendar_data.json"))
 
 
-def _flag(code: str) -> str:
-    """Mã ISO-2 -> emoji cờ (ký tự khu vực). Không hợp lệ thì trả nguyên mã."""
-    return "".join(chr(0x1F1E6 + ord(c) - 65) for c in code) if len(code) == 2 and code.isalpha() and code.isupper() else code
+def page_admin():
+    ui.render_admin_page()
 
 
-def _cal_val(v, unit: str, scale: str) -> str:
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return "–"
-    if isinstance(v, str):
-        return v
-    txt = f"{v:,.3f}".rstrip("0").rstrip(".")
-    return f"{txt}{scale or ''}{'%' if unit == '%' else (' ' + unit if unit else '')}"
-
-
-def _vs_forecast(actual, forecast) -> str:
-    """So thực tế với dự báo — chỉ nêu cao/thấp hơn, không đánh giá tốt/xấu (tuỳ chỉ tiêu)."""
-    if not isinstance(actual, (int, float)) or not isinstance(forecast, (int, float)):
-        return ""
-    if actual > forecast:
-        return "▲ cao hơn"
-    if actual < forecast:
-        return "▼ thấp hơn"
-    return "＝ đúng dự báo"
-
-
-def render_calendar(cal):
-    st.header("📅 Lịch kinh tế")
-    events = (cal or {}).get("events") or []
-    if not events:
-        _missing("calendar_data.json", "Cập nhật lịch kinh tế (update_calendar)")
-        return
-    df = pd.DataFrame(events)
-    df["dt"] = pd.to_datetime(df["date"], utc=True, errors="coerce").dt.tz_convert(VN_TZ_NAME)
-    df = df.dropna(subset=["dt"]).sort_values(["dt", "importance"], ascending=[True, False])
-    now = pd.Timestamp.now(tz=VN_TZ_NAME)
-    today = now.normalize()
-
-    st.caption(f"Nguồn: TradingView (không chính thức) · Giờ Việt Nam (GMT+7) · Cập nhật lần cuối: {cal.get('updated_at', '–')} · "
-               "Số liệu chỉ để tham khảo, có thể trễ hoặc sai khác so với nguồn gốc.")
-
-    countries = [c for c in COUNTRY_NAMES if c in set(df["country"])] + sorted(set(df["country"]) - set(COUNTRY_NAMES))
-    c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
-    rng = c1.segmented_control("Khoảng thời gian", CAL_RANGES, default="7 ngày tới", key="cal_rng") or "7 ngày tới"
-    imp_pick = c2.pills("Mức quan trọng", ["Cao", "Trung bình", "Thấp"], selection_mode="multi",
-                        default=["Cao", "Trung bình"], key="cal_imp")
-    picked = st.multiselect("Quốc gia", countries, default=[c for c in ["VN", "US"] if c in countries] or countries[:2],
-                            format_func=lambda c: f"{_flag(c)} {COUNTRY_NAMES.get(c, c)}", key="cal_countries")
-
-    lo, hi = {
-        "Hôm nay": (today, today + pd.Timedelta(days=1)),
-        "Ngày mai": (today + pd.Timedelta(days=1), today + pd.Timedelta(days=2)),
-        "7 ngày tới": (today, today + pd.Timedelta(days=7)),
-        "30 ngày tới": (today, today + pd.Timedelta(days=30)),
-        "7 ngày qua": (today - pd.Timedelta(days=7), today + pd.Timedelta(days=1)),
-    }[rng]
-    imp_map = {"Cao": 1, "Trung bình": 0, "Thấp": -1}
-    imp_vals = {imp_map[x] for x in (imp_pick or [])}
-    view = df[(df["dt"] >= lo) & (df["dt"] < hi) & df["country"].isin(picked) & df["importance"].isin(imp_vals)]
-
-    upcoming = df[(df["dt"] >= now) & (df["importance"] == 1) & df["country"].isin(picked)]
-    nxt = upcoming.iloc[0] if not upcoming.empty else None
-    ui.kpi_row([
-        ("Số sự kiện (theo bộ lọc)", f"{len(view):,}", None),
-        ("Mức quan trọng cao", f"{int((view['importance'] == 1).sum()):,}", "Trong bộ lọc hiện tại"),
-        ("Đã công bố", f"{int(view['actual'].notna().sum()):,}", "Có số liệu thực tế"),
-        ("Sự kiện lớn kế tiếp", f"{nxt['dt']:%d/%m %H:%M}" if nxt is not None else "–",
-         f"{_flag(nxt['country'])} {nxt['title']}" if nxt is not None else "Không có trong bộ lọc quốc gia đã chọn"),
-    ])
-    if view.empty:
-        st.info("Không có sự kiện nào khớp bộ lọc. Thử mở rộng khoảng thời gian, thêm quốc gia hoặc mức quan trọng.")
-        return
-
-    for day, g in view.groupby(view["dt"].dt.normalize(), sort=True):
-        tag = " · Hôm nay" if day == today else ""
-        st.subheader(f"{WEEKDAYS[day.weekday()]}, {day:%d/%m/%Y}{tag}")
-        tbl = pd.DataFrame({
-            "Giờ": g["dt"].dt.strftime("%H:%M"),
-            "Quốc gia": [f"{_flag(c)} {c}" for c in g["country"]],
-            "Sự kiện": [f"{t} ({p})" if p else t for t, p in zip(g["title"], g["period"])],
-            "Mức": g["importance"].map(IMPORTANCE),
-            "Thực tế": [_cal_val(a, u, s) for a, u, s in zip(g["actual"], g["unit"], g["scale"])],
-            "Dự báo": [_cal_val(a, u, s) for a, u, s in zip(g["forecast"], g["unit"], g["scale"])],
-            "Kỳ trước": [_cal_val(a, u, s) for a, u, s in zip(g["previous"], g["unit"], g["scale"])],
-            "So với dự báo": [_vs_forecast(a, f) for a, f in zip(g["actual"], g["forecast"])],
-        })
-        st.dataframe(tbl.style.apply(ui._zebra, axis=None), hide_index=True, width="stretch",
-                     height=min(36 * (len(tbl) + 1) + 3, 520),
-                     column_config={"Sự kiện": st.column_config.TextColumn("Sự kiện", width="large"),
-                                    "Giờ": st.column_config.TextColumn("Giờ", width="small")})
+# ---- Điều hướng ở thanh bên trái ----
+pages = [
+    st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs", default=True),
+    st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
+    st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
+    st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
+    st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
+    st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
+    st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
+]
+if is_admin:
+    pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
+st.navigation(pages, position="sidebar").run()
