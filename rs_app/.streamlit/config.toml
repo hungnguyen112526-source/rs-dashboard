@@ -1,21 +1,22 @@
-# Giao diện: sáng kiểu báo cáo tài chính (mặc định) + chế độ tối.
-# Người dùng đổi bằng menu ⋮ (góc trên phải) → Settings → Theme.
+# Giao diện theo mẫu "lucianLabs UI": nền kem + thẻ bo tròn + điểm nhấn tím/xanh, font Pretendard.
+# Người dùng đổi sáng/tối bằng menu ⋮ (góc trên phải) → Settings → Theme.
 [theme]
-primaryColor = "#1d4ed8"
-font = "sans serif"
+primaryColor = "#6A57F2"
+# Pretendard (hỗ trợ đủ dấu tiếng Việt); tải theo từng phần nhỏ nên nhẹ. Thiếu mạng thì dùng font hệ thống.
+font = "Pretendard Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css, sans-serif"
 baseRadius = "large"
 
 [theme.light]
-primaryColor = "#1d4ed8"
-backgroundColor = "#f4f6fa"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#0f2742"
+primaryColor = "#6A57F2"
+backgroundColor = "#F4F2EE"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#16151B"
 
 [theme.dark]
-primaryColor = "#60a5fa"
-backgroundColor = "#0b1220"
-secondaryBackgroundColor = "#131c2e"
-textColor = "#e6edf7"
+primaryColor = "#B7A4FF"
+backgroundColor = "#07080D"
+secondaryBackgroundColor = "#13141C"
+textColor = "#F4F0E8"
 
 [client]
 toolbarMode = "auto"
