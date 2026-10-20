@@ -51,6 +51,9 @@ RSS_SOURCES = [
     {"url": "https://vietstock.vn/773/the-gioi/chung-khoan-the-gioi.rss", "source": "Vietstock", "category": "Thế giới / Quốc tế"},
     # --- Quốc tế ---
     {"url": "https://www.investing.com/rss/news.rss", "source": "Investing.com", "category": "Thế giới / Quốc tế"},
+    # investingLive = ForexLive cũ (đổi tên 21/07/2025). Feed chính thức: https://investinglive.com/rss/
+    {"url": "https://investinglive.com/feed/news/", "source": "investingLive", "category": "Thế giới / Quốc tế"},
+    {"url": "https://investinglive.com/feed/centralbank/", "source": "investingLive", "category": "Thế giới / Quốc tế"},
 ]
 
 CATEGORY_ORDER = [
@@ -190,3 +193,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+  
