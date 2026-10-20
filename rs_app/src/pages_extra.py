@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 from src import engine, ui
 
 ROOT = Path(__file__).resolve().parent.parent  # thư mục rs_app/
-GREEN, RED, BLUE, AMBER = "#16a34a", "#dc2626", "#2563eb", "#f59e0b"
+GREEN, RED, BLUE, AMBER = "#16a34a", "#dc2626", "#7B61FF", "#f59e0b"
 GRID = "rgba(128,128,128,.18)"
 
 
