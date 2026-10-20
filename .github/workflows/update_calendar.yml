@@ -1,0 +1,61 @@
+name: Cập nhật lịch kinh tế
+
+# Lấy lịch kinh tế từ TradingView (endpoint công khai, không chính thức) -> calendar_data.json.
+# Chạy 3 tiếng/lần vào ngày thường (đủ để cập nhật số liệu "thực tế" sau khi công bố); không cần API key.
+# Chỉ phục vụ app Streamlit nên KHÔNG sinh lại HTML tĩnh.
+
+on:
+  schedule:
+    - cron: "15 */3 * * 1-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: update-calendar
+  cancel-in-progress: false
+
+jobs:
+  update-calendar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install requests
+
+      - name: Lấy lịch kinh tế
+        run: python fetch_calendar.py
+
+      - name: Commit và push lịch kinh tế
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add calendar_data.json
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật lịch kinh tế tự động $(date +'%Y-%m-%d %H:%M')"
+
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase -X theirs origin/main || { git rebase --abort; }
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1
