@@ -1,4 +1,4 @@
-"""Các trang còn lại của bản Streamlit: Tin tức, Dòng tiền, BCTC, Vĩ mô.
+]"""Các trang còn lại của bản Streamlit: Tin tức, Dòng tiền, BCTC, Vĩ mô.
 
 Mỗi hàm render_* nhận dữ liệu đã nạp sẵn và tự vẽ trang. Dữ liệu JSON (news_data.json, financials_data.json,
 macro_data.json, bond_yields.json) vẫn do GitHub Actions cập nhật như cũ; app chỉ đọc file.
@@ -501,3 +501,105 @@ def render_macro(macro, bonds, vnindex: pd.DataFrame):
         _fed_card(macro)
     else:
         _missing("macro_data.json", "Cập nhật dữ liệu (update_data)")
+
+
+# ----------------------------------------------------------------------------
+# 📅 Lịch kinh tế
+# ----------------------------------------------------------------------------
+VN_TZ_NAME = "Asia/Ho_Chi_Minh"
+WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật"]
+COUNTRY_NAMES = {"VN": "Việt Nam", "US": "Mỹ", "CN": "Trung Quốc", "EU": "Khu vực euro", "JP": "Nhật Bản",
+                 "GB": "Anh", "DE": "Đức", "KR": "Hàn Quốc"}
+IMPORTANCE = {1: "🔴 Cao", 0: "🟠 Trung bình", -1: "⚪ Thấp"}
+CAL_RANGES = ["Hôm nay", "Ngày mai", "7 ngày tới", "30 ngày tới", "7 ngày qua"]
+
+
+def _flag(code: str) -> str:
+    """Mã ISO-2 -> emoji cờ (ký tự khu vực). Không hợp lệ thì trả nguyên mã."""
+    return "".join(chr(0x1F1E6 + ord(c) - 65) for c in code) if len(code) == 2 and code.isalpha() and code.isupper() else code
+
+
+def _cal_val(v, unit: str, scale: str) -> str:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return "–"
+    if isinstance(v, str):
+        return v
+    txt = f"{v:,.3f}".rstrip("0").rstrip(".")
+    return f"{txt}{scale or ''}{'%' if unit == '%' else (' ' + unit if unit else '')}"
+
+
+def _vs_forecast(actual, forecast) -> str:
+    """So thực tế với dự báo — chỉ nêu cao/thấp hơn, không đánh giá tốt/xấu (tuỳ chỉ tiêu)."""
+    if not isinstance(actual, (int, float)) or not isinstance(forecast, (int, float)):
+        return ""
+    if actual > forecast:
+        return "▲ cao hơn"
+    if actual < forecast:
+        return "▼ thấp hơn"
+    return "＝ đúng dự báo"
+
+
+def render_calendar(cal):
+    st.header("📅 Lịch kinh tế")
+    events = (cal or {}).get("events") or []
+    if not events:
+        _missing("calendar_data.json", "Cập nhật lịch kinh tế (update_calendar)")
+        return
+    df = pd.DataFrame(events)
+    df["dt"] = pd.to_datetime(df["date"], utc=True, errors="coerce").dt.tz_convert(VN_TZ_NAME)
+    df = df.dropna(subset=["dt"]).sort_values(["dt", "importance"], ascending=[True, False])
+    now = pd.Timestamp.now(tz=VN_TZ_NAME)
+    today = now.normalize()
+
+    st.caption(f"Nguồn: TradingView (không chính thức) · Giờ Việt Nam (GMT+7) · Cập nhật lần cuối: {cal.get('updated_at', '–')} · "
+               "Số liệu chỉ để tham khảo, có thể trễ hoặc sai khác so với nguồn gốc.")
+
+    countries = [c for c in COUNTRY_NAMES if c in set(df["country"])] + sorted(set(df["country"]) - set(COUNTRY_NAMES))
+    c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
+    rng = c1.segmented_control("Khoảng thời gian", CAL_RANGES, default="7 ngày tới", key="cal_rng") or "7 ngày tới"
+    imp_pick = c2.pills("Mức quan trọng", ["Cao", "Trung bình", "Thấp"], selection_mode="multi",
+                        default=["Cao", "Trung bình"], key="cal_imp")
+    picked = st.multiselect("Quốc gia", countries, default=[c for c in ["VN", "US"] if c in countries] or countries[:2],
+                            format_func=lambda c: f"{_flag(c)} {COUNTRY_NAMES.get(c, c)}", key="cal_countries")
+
+    lo, hi = {
+        "Hôm nay": (today, today + pd.Timedelta(days=1)),
+        "Ngày mai": (today + pd.Timedelta(days=1), today + pd.Timedelta(days=2)),
+        "7 ngày tới": (today, today + pd.Timedelta(days=7)),
+        "30 ngày tới": (today, today + pd.Timedelta(days=30)),
+        "7 ngày qua": (today - pd.Timedelta(days=7), today + pd.Timedelta(days=1)),
+    }[rng]
+    imp_map = {"Cao": 1, "Trung bình": 0, "Thấp": -1}
+    imp_vals = {imp_map[x] for x in (imp_pick or [])}
+    view = df[(df["dt"] >= lo) & (df["dt"] < hi) & df["country"].isin(picked) & df["importance"].isin(imp_vals)]
+
+    upcoming = df[(df["dt"] >= now) & (df["importance"] == 1) & df["country"].isin(picked)]
+    nxt = upcoming.iloc[0] if not upcoming.empty else None
+    ui.kpi_row([
+        ("Số sự kiện (theo bộ lọc)", f"{len(view):,}", None),
+        ("Mức quan trọng cao", f"{int((view['importance'] == 1).sum()):,}", "Trong bộ lọc hiện tại"),
+        ("Đã công bố", f"{int(view['actual'].notna().sum()):,}", "Có số liệu thực tế"),
+        ("Sự kiện lớn kế tiếp", f"{nxt['dt']:%d/%m %H:%M}" if nxt is not None else "–",
+         f"{_flag(nxt['country'])} {nxt['title']}" if nxt is not None else "Không có trong bộ lọc quốc gia đã chọn"),
+    ])
+    if view.empty:
+        st.info("Không có sự kiện nào khớp bộ lọc. Thử mở rộng khoảng thời gian, thêm quốc gia hoặc mức quan trọng.")
+        return
+
+    for day, g in view.groupby(view["dt"].dt.normalize(), sort=True):
+        tag = " · Hôm nay" if day == today else ""
+        st.subheader(f"{WEEKDAYS[day.weekday()]}, {day:%d/%m/%Y}{tag}")
+        tbl = pd.DataFrame({
+            "Giờ": g["dt"].dt.strftime("%H:%M"),
+            "Quốc gia": [f"{_flag(c)} {c}" for c in g["country"]],
+            "Sự kiện": [f"{t} ({p})" if p else t for t, p in zip(g["title"], g["period"])],
+            "Mức": g["importance"].map(IMPORTANCE),
+            "Thực tế": [_cal_val(a, u, s) for a, u, s in zip(g["actual"], g["unit"], g["scale"])],
+            "Dự báo": [_cal_val(a, u, s) for a, u, s in zip(g["forecast"], g["unit"], g["scale"])],
+            "Kỳ trước": [_cal_val(a, u, s) for a, u, s in zip(g["previous"], g["unit"], g["scale"])],
+            "So với dự báo": [_vs_forecast(a, f) for a, f in zip(g["actual"], g["forecast"])],
+        })
+        st.dataframe(tbl.style.apply(ui._zebra, axis=None), hide_index=True, width="stretch",
+                     height=min(36 * (len(tbl) + 1) + 3, 520),
+                     column_config={"Sự kiện": st.column_config.TextColumn("Sự kiện", width="large"),
+                                    "Giờ": st.column_config.TextColumn("Giờ", width="small")})
