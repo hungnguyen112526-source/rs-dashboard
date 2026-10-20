@@ -1,4 +1,4 @@
-]"""Các trang còn lại của bản Streamlit: Tin tức, Dòng tiền, BCTC, Vĩ mô.
+"""Các trang còn lại của bản Streamlit: Tin tức, Dòng tiền, BCTC, Vĩ mô.
 
 Mỗi hàm render_* nhận dữ liệu đã nạp sẵn và tự vẽ trang. Dữ liệu JSON (news_data.json, financials_data.json,
 macro_data.json, bond_yields.json) vẫn do GitHub Actions cập nhật như cũ; app chỉ đọc file.
