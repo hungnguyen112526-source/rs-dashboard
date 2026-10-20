@@ -279,6 +279,10 @@ def page_macro():
                              pages_extra.load_json("bond_yields.json"), vnindex)
 
 
+def page_calendar():
+    pages_extra.render_calendar(pages_extra.load_json("calendar_data.json"))
+
+
 def page_admin():
     ui.render_admin_page()
 
@@ -291,6 +295,7 @@ pages = [
     st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
     st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
     st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
+    st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
 ]
 if is_admin:
     pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
