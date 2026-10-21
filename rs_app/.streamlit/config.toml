@@ -23,3 +23,6 @@ toolbarMode = "auto"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+enableStaticServing = true
