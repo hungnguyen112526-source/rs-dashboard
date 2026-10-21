@@ -296,6 +296,10 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
                       legend=dict(orientation="h", y=1.04, x=1, xanchor="right"),
                       xaxis_rangeslider_visible=False)
     grid = "rgba(128,128,128,.18)"
-    fig.update_xaxes(type="category", tickmode="array", tickvals=tickvals, ticktext=ticktext, gridcolor=grid)
+    # Đặt range tường minh + uirevision riêng theo dữ liệu: không phụ thuộc autorange và không "thừa hưởng"
+    # vùng nhìn cũ khi mở biểu đồ mã khác (nghi nguyên nhân biểu đồ bị lệch/cắt cụt cửa sổ thời gian).
+    fig.update_xaxes(type="category", tickmode="array", tickvals=tickvals, ticktext=ticktext,
+                     range=[-1, len(xs) + 1], gridcolor=grid)
+    fig.update_layout(uirevision=f"{title}|{len(xs)}|{xs[-1]}")
     fig.update_yaxes(gridcolor=grid)
     return fig
