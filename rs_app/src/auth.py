@@ -1,5 +1,5 @@
 """
-Đăng ký / đăng nhập cho RS Dashboard (Streamlit).
+Đăng ký / đăng nhập cho Chứng khoán sung rụng (Streamlit).
 
 Thiết kế dựa trên bản của Dupont nhưng đã sửa các điểm yếu bảo mật:
 - Mật khẩu băm bằng bcrypt (salt riêng cho từng người, chậm có chủ đích) thay vì SHA-256 + salt cố định.
