@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import auth, engine, pages_extra, ui  # noqa: E402
+from src import auth, engine, night, pages_extra, ui  # noqa: E402
 
 st.set_page_config(page_title="Chứng khoán sung rụng", page_icon="📈", layout="wide", initial_sidebar_state="auto")
 ui.apply_css()
@@ -56,6 +56,7 @@ with st.sidebar:
     if c2.button("🚪 Thoát", width="stretch"):
         auth.logout()
     st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
+    night.render(night.toggle())
 
 
 @st.cache_data(ttl=600)
