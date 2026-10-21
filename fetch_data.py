@@ -19,18 +19,46 @@ API_KEY = os.environ.get("VNSTOCK_API_KEY")
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
 OUTPUT_FILE = "gia_lich_su_rs.csv"
 
-# Không dùng ngày cố định (start=...) nữa. Thay vào đó lấy đúng N phiên gần nhất
-# tính đến ngày chạy script -> mỗi lần chạy tự động "trượt" theo ngày hiện tại.
-# Công thức RS cần tối thiểu 120 phiên (30 phiên x 4 khối); lấy dư ra 150 để an toàn
-# (một số phiên có thể bị thiếu do nghỉ lễ/dữ liệu lỗi ở nguồn).
-SESSIONS_TO_FETCH = 10000000000000000000
+# Lấy TOÀN BỘ lịch sử từ HISTORY_START đến hôm nay (đổi bằng biến môi trường HISTORY_START,
+# vd "2010-01-01"). Dùng start/end thay cho count vì count=<số rất lớn> bị nguồn tự giới hạn
+# ở ~1245 phiên (5 năm gần nhất), làm lịch sử cũ bị mất dần theo thời gian.
+# Lưu ý dung lượng: càng lùi xa file CSV càng lớn (GitHub chặn file > 100 MB).
+HISTORY_START = os.environ.get("HISTORY_START", "2015-01-01")
+# Chỉ dùng khi API không nhận start/end (dự phòng). Công thức RS cần tối thiểu 120 phiên.
+SESSIONS_TO_FETCH = 1300
 MIN_SESSIONS_REQUIRED = 120
+
+
+def _ohlcv_full(obj):
+    """Gọi ohlcv() lấy toàn bộ lịch sử từ HISTORY_START; nếu API không nhận start/end thì dùng count."""
+    end = pd.Timestamp.today().strftime("%Y-%m-%d")
+    try:
+        return obj.ohlcv(start=HISTORY_START, end=end, interval="1D")
+    except TypeError:
+        return obj.ohlcv(count=SESSIONS_TO_FETCH, interval="1D")
+
+
+def merge_with_existing(new_df, path):
+    """Gộp dữ liệu mới vào file CSV cũ (nếu có): giữ các phiên cũ mà nguồn không còn trả về,
+    phiên trùng (cùng mã + cùng ngày) lấy bản mới. Nhờ vậy lịch sử chỉ dài thêm, không bị cắt mất."""
+    if os.path.exists(path):
+        try:
+            old = pd.read_csv(path, low_memory=False)
+            old["date"] = pd.to_datetime(old["date"])
+            new_df = pd.concat([old, new_df], ignore_index=True)
+        except Exception as e:
+            print(f"CẢNH BÁO: không đọc được file cũ để gộp ({type(e).__name__}) - chỉ lưu dữ liệu mới.")
+    new_df["_d"] = new_df["date"].dt.normalize()
+    new_df = (new_df.sort_values("date", kind="stable")
+                    .drop_duplicates(subset=["_d", "ticker"], keep="last")
+                    .drop(columns="_d"))
+    return new_df
 
 
 def fetch_one(market, ticker):
     """Lấy dữ liệu giá cho 1 mã. Trả về DataFrame (date, open, high, low, close, volume, ticker)
     hoặc None nếu lỗi."""
-    df = market.equity(symbol=ticker).ohlcv(count=SESSIONS_TO_FETCH, interval="1D")
+    df = _ohlcv_full(market.equity(symbol=ticker))
     if df is None or df.empty:
         return None
     df = df.rename(columns={c: c.lower() for c in df.columns})
@@ -45,7 +73,7 @@ def fetch_index(market, symbol="VNINDEX"):
     """Lấy dữ liệu OHLCV cho 1 chỉ số thị trường (VNINDEX...) - dùng market.index() thay vì
     market.equity() vì đây không phải cổ phiếu riêng lẻ. Trả về DataFrame hoặc None nếu lỗi."""
     try:
-        df = market.index(symbol=symbol).ohlcv(count=SESSIONS_TO_FETCH, interval="1D")
+        df = _ohlcv_full(market.index(symbol=symbol))
     except Exception as e:
         print(f"Lỗi lấy chỉ số {symbol}: {type(e).__name__}")
         return None
@@ -160,14 +188,13 @@ def main():
         for t, n in insufficient.items():
             print(f"  - {t}: {n} phiên")
 
-    # --- Loại bỏ dòng trùng lặp (cùng ngày + cùng mã) trước khi lưu ---
+    # --- Gộp với file cũ + loại dòng trùng lặp (cùng ngày + cùng mã) trước khi lưu ---
     # Một số nguồn dữ liệu đôi khi trả về 2 dòng cho cùng 1 phiên (vd: dữ liệu "tạm"
     # lúc thị trường chưa đóng cửa rồi được cập nhật lại) -> gây lỗi khi tính toán sau này.
     before_dedup = len(price_df)
-    price_df = price_df.sort_values("date").drop_duplicates(subset=["date", "ticker"], keep="last")
+    price_df = merge_with_existing(price_df, OUTPUT_FILE)
     removed = before_dedup - len(price_df)
-    if removed > 0:
-        print(f"\nĐã loại bỏ {removed} dòng trùng lặp (cùng ngày + cùng mã).")
+    print(f"\nSau khi gộp với file cũ + loại trùng: {len(price_df)} dòng (chênh {removed:+d} so với dữ liệu vừa lấy).")
 
     price_df.to_csv(OUTPUT_FILE, index=False)
     print(f"\nĐã lưu file {OUTPUT_FILE}")
