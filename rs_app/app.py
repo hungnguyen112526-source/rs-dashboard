@@ -1,4 +1,4 @@
-"""RS Dashboard (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
+"""Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from src import auth, engine, pages_extra, ui  # noqa: E402
 
-st.set_page_config(page_title="RS Dashboard", page_icon="📈", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="Chứng khoán sung rụng", page_icon="📈", layout="wide", initial_sidebar_state="auto")
 ui.apply_css()
 
 auth.ensure_admin()
