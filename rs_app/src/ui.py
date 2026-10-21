@@ -105,7 +105,7 @@ def render_auth_portal():
     with st.container(border=True, key="card_auth"):
         st.markdown(
             '<div class="auth-head"><div class="auth-logo">📈</div>'
-            '<div class="auth-title">RS DASHBOARD</div>'
+            '<div class="auth-title">CHỨNG KHOÁN SUNG RỤNG</div>'
             '<div class="auth-sub">Xếp hạng sức mạnh giá · Lọc khối lượng · Cổ phiếu Việt Nam</div></div>',
             unsafe_allow_html=True,
         )
