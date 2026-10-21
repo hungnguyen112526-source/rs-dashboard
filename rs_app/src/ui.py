@@ -273,21 +273,29 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
     if tail:
         ohlcv = ohlcv.tail(tail)
 
+    # Trục x dạng 'category' (mỗi phiên 1 nến, liền nhau): không còn khoảng trống ở ngày lễ/Tết/phiên thiếu
+    # và không phụ thuộc cách Plotly tự tính khoảng ngày (rangebreaks) -> hết lệch/cắt cụt cửa sổ thời gian.
+    dts = pd.to_datetime(ohlcv.index)
+    xs = list(dts.strftime("%Y-%m-%d"))
+    step = max(1, len(xs) // 8)
+    tickvals = xs[::step]
+    ticktext = [pd.Timestamp(v).strftime("%d/%m/%y") for v in tickvals]
+
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.74, 0.26], vertical_spacing=0.03)
     fig.add_trace(go.Candlestick(
-        x=ohlcv.index, open=ohlcv["open"], high=ohlcv["high"], low=ohlcv["low"], close=ohlcv["close"],
+        x=xs, open=ohlcv["open"], high=ohlcv["high"], low=ohlcv["low"], close=ohlcv["close"],
         increasing_line_color="#16a34a", decreasing_line_color="#dc2626", name="Giá"), row=1, col=1)
     if has_vol:
         colors = ["rgba(22,163,74,.45)" if c >= o else "rgba(220,38,38,.45)" for o, c in zip(ohlcv["open"], ohlcv["close"])]
-        fig.add_trace(go.Bar(x=ohlcv.index, y=ohlcv["volume"], marker_color=colors, name="KLGD"), row=2, col=1)
-        fig.add_trace(go.Scatter(x=ohlcv.index, y=ohlcv["ma5"], mode="lines", name="TB5",
+        fig.add_trace(go.Bar(x=xs, y=ohlcv["volume"], marker_color=colors, name="KLGD"), row=2, col=1)
+        fig.add_trace(go.Scatter(x=xs, y=ohlcv["ma5"], mode="lines", name="TB5",
                                  line=dict(color="#f59e0b", width=1.4)), row=2, col=1)
-        fig.add_trace(go.Scatter(x=ohlcv.index, y=ohlcv["ma20"], mode="lines", name="TB20",
+        fig.add_trace(go.Scatter(x=xs, y=ohlcv["ma20"], mode="lines", name="TB20",
                                  line=dict(color="#7B61FF", width=1.4)), row=2, col=1)
     fig.update_layout(title=title, height=460, showlegend=has_vol, margin=dict(l=10, r=10, t=40, b=10),
-                      legend=dict(orientation="h", y=-0.02, x=1, xanchor="right"),
+                      legend=dict(orientation="h", y=1.04, x=1, xanchor="right"),
                       xaxis_rangeslider_visible=False)
     grid = "rgba(128,128,128,.18)"
-    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])], gridcolor=grid)
+    fig.update_xaxes(type="category", tickmode="array", tickvals=tickvals, ticktext=ticktext, gridcolor=grid)
     fig.update_yaxes(gridcolor=grid)
     return fig
