@@ -413,7 +413,7 @@ def _vnindex_card(vnindex: pd.DataFrame):
         if ohlcv.empty:
             st.info("Không có dữ liệu nến cho VN-Index.")
             return
-        st.plotly_chart(ui.candle_chart(ohlcv, f"VN-Index — {frame}", tail=400 if frame == "Ngày" else 200),
+        st.plotly_chart(ui.candle_chart(ohlcv, f"VN-Index — {frame}"),
                         width="stretch")
 
 
