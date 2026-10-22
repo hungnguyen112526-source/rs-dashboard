@@ -316,7 +316,7 @@ _TV_HTML = """<!doctype html><meta charset="utf-8">
 #r{position:absolute;right:62px;top:6px;z-index:3;border:1px solid __GRID__;background:transparent;color:__FG__;
 border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}</style>
 <div id="c"></div><div id="t"></div><div id="o"></div><button id="r" title="Về mặc định">⟲ Reset</button>
-<script src="/app/static/lightweight-charts.standalone.production.js"></script>
+__LIB__
 <script>
 const D = __DATA__, FG = "__FG__", GRID = "__GRID__", L = LightweightCharts;
 document.getElementById("t").textContent = D.title;
@@ -371,6 +371,27 @@ def _tv_payload(ohlcv: pd.DataFrame, title: str) -> dict:
     return {"title": title, "c": c, "v": v, "m5": ma(5), "m20": ma(20)}
 
 
+_LWC_VER = "5.2.1"
+
+
+def _lwc_script() -> str:
+    """Thư viện nhúng thẳng vào trang (không phụ thuộc phục vụ file tĩnh của Streamlit); thiếu file thì dùng CDN."""
+    import functools
+    from pathlib import Path
+    f = Path(__file__).resolve().parent.parent / "static" / "lightweight-charts.standalone.production.js"
+    try:
+        code = _lwc_read(str(f))
+        return "<script>" + code.replace("</script", "<\\/script") + "</script>"
+    except OSError:
+        return f'<script src="https://unpkg.com/lightweight-charts@{_LWC_VER}/dist/lightweight-charts.standalone.production.js"></script>'
+
+
+@__import__("functools").lru_cache(maxsize=1)
+def _lwc_read(path: str) -> str:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 def price_chart(ohlcv: pd.DataFrame, title: str, height: int = 560) -> None:
     """Vẽ biểu đồ giá. Đặt biến môi trường CHART_ENGINE=plotly để quay lại biểu đồ Plotly cũ."""
     import json
@@ -380,7 +401,7 @@ def price_chart(ohlcv: pd.DataFrame, title: str, height: int = 560) -> None:
         st.plotly_chart(candle_chart(ohlcv, title), width="stretch")
         return
     dark = getattr(st.context.theme, "type", None) == "dark"
-    html = (_TV_HTML.replace("__DATA__", json.dumps(_tv_payload(ohlcv, title), ensure_ascii=False))
+    html = (_TV_HTML.replace("__LIB__", _lwc_script()).replace("__DATA__", json.dumps(_tv_payload(ohlcv, title), ensure_ascii=False))
             .replace("__FG__", "#d7dbe0" if dark else "#3b3a42")
             .replace("__GRID__", "rgba(128,128,128,.22)"))
     if hasattr(st, "iframe"):          # components.v1.html đã bị Streamlit loại bỏ dần -> ưu tiên st.iframe
