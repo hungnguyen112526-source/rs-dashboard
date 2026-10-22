@@ -81,8 +81,7 @@ def show_chart(ticker: str, key: str):
     if ohlcv.empty:
         st.info("Không có dữ liệu giá cho mã này.")
         return
-    st.plotly_chart(ui.candle_chart(ohlcv, f"{ticker} — {frame}"),
-                    width="stretch")
+    ui.price_chart(ohlcv, f"{ticker} — {frame}")
 
 
 def open_chart(frame_df: pd.DataFrame, ticker: str, key: str):
