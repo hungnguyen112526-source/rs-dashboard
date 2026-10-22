@@ -303,3 +303,87 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
     fig.update_layout(uirevision=f"{title}|{len(xs)}|{xs[-1]}")
     fig.update_yaxes(gridcolor=grid)
     return fig
+
+
+# ---------------------------------------------------------------- Biểu đồ giá kiểu TradingView
+# Dùng TradingView Lightweight Charts v5.2.1 (Apache-2.0; yêu cầu ghi công TradingView -> giữ nguyên logo trên biểu đồ).
+# Kéo chuột = di chuyển · lăn chuột = zoom quanh con trỏ · kéo trên trục = co giãn · trục giá tự khớp vùng đang xem.
+_TV_HTML = """<!doctype html><meta charset="utf-8">
+<style>html,body{margin:0;height:100%;background:transparent;font:12px system-ui,sans-serif;overflow:hidden}
+#c{position:absolute;inset:0}
+#t{position:absolute;left:10px;top:6px;z-index:3;font-weight:600;color:__FG__;pointer-events:none}
+#o{position:absolute;left:10px;top:24px;z-index:3;color:__FG__;opacity:.85;font-size:11px;pointer-events:none}
+#r{position:absolute;right:62px;top:6px;z-index:3;border:1px solid __GRID__;background:transparent;color:__FG__;
+border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}</style>
+<div id="c"></div><div id="t"></div><div id="o"></div><button id="r" title="Về mặc định">⟲ Reset</button>
+<script src="/app/static/lightweight-charts.standalone.production.js"></script>
+<script>
+const D = __DATA__, FG = "__FG__", GRID = "__GRID__", L = LightweightCharts;
+document.getElementById("t").textContent = D.title;
+const chart = L.createChart(document.getElementById("c"), {
+  autoSize: true,
+  layout: { background: { type: "solid", color: "transparent" }, textColor: FG, fontFamily: "system-ui, sans-serif",
+            panes: { separatorColor: GRID } },
+  grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
+  rightPriceScale: { borderColor: GRID },
+  timeScale: { borderColor: GRID, rightOffset: 6, minBarSpacing: 0.4 },
+  crosshair: { mode: L.CrosshairMode.Normal }
+});
+const UP = "#16a34a", DN = "#dc2626";
+const cs = chart.addSeries(L.CandlestickSeries, { upColor: UP, downColor: DN, borderUpColor: UP, borderDownColor: DN,
+  wickUpColor: UP, wickDownColor: DN });
+cs.setData(D.c);
+const vs = chart.addSeries(L.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false,
+  priceLineVisible: false }, 1);
+vs.setData(D.v);
+const line = (color, data) => { const s = chart.addSeries(L.LineSeries, { color, lineWidth: 1, lastValueVisible: false,
+  priceLineVisible: false, crosshairMarkerVisible: false }, 1); s.setData(data); return s; };
+line("#f59e0b", D.m5); line("#7B61FF", D.m20);
+const panes = chart.panes(); panes[0].setStretchFactor(3); if (panes[1]) panes[1].setStretchFactor(1);
+chart.timeScale().fitContent();
+
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n);
+const vol = {}; D.v.forEach(x => vol[x.time] = x.value);
+function show(time, b) {
+  if (!b) return;
+  const c = b.close >= b.open ? UP : DN;
+  document.getElementById("o").innerHTML = time + " &nbsp; M " + b.open + " &nbsp; C " + b.high + " &nbsp; T " + b.low +
+    " &nbsp; Đ <b style='color:" + c + "'>" + b.close + "</b> &nbsp; KL " + fmt(vol[time] || 0);
+}
+const last = D.c[D.c.length - 1]; show(last.time, last);
+chart.subscribeCrosshairMove(p => { const b = p.seriesData && p.seriesData.get(cs); if (b && p.time) show(p.time, b); else show(last.time, last); });
+document.getElementById("r").onclick = () => { chart.priceScale("right").applyOptions({ autoScale: true }); chart.timeScale().fitContent(); };
+</script>"""
+
+
+def _tv_payload(ohlcv: pd.DataFrame, title: str) -> dict:
+    d = ohlcv.dropna(subset=["open", "high", "low", "close"]).copy()
+    d.index = pd.to_datetime(d.index)
+    d = d[~d.index.duplicated(keep="last")].sort_index()
+    t = d.index.strftime("%Y-%m-%d")
+    vol = d["volume"].fillna(0)
+    rnd = lambda s: [round(float(x), 4) for x in s]
+    c = [{"time": ti, "open": o, "high": h, "low": l, "close": cl}
+         for ti, o, h, l, cl in zip(t, rnd(d["open"]), rnd(d["high"]), rnd(d["low"]), rnd(d["close"]))]
+    v = [{"time": ti, "value": float(x), "color": "rgba(22,163,74,.45)" if cl >= o else "rgba(220,38,38,.45)"}
+         for ti, x, o, cl in zip(t, vol, d["open"], d["close"])]
+    ma = lambda n: [{"time": ti, "value": round(float(x), 2)} for ti, x in zip(t, vol.rolling(n).mean()) if pd.notna(x)]
+    return {"title": title, "c": c, "v": v, "m5": ma(5), "m20": ma(20)}
+
+
+def price_chart(ohlcv: pd.DataFrame, title: str, height: int = 560) -> None:
+    """Vẽ biểu đồ giá. Đặt biến môi trường CHART_ENGINE=plotly để quay lại biểu đồ Plotly cũ."""
+    import json
+    import os
+    import streamlit.components.v1 as components
+    if os.environ.get("CHART_ENGINE") == "plotly":
+        st.plotly_chart(candle_chart(ohlcv, title), width="stretch")
+        return
+    dark = getattr(st.context.theme, "type", None) == "dark"
+    html = (_TV_HTML.replace("__DATA__", json.dumps(_tv_payload(ohlcv, title), ensure_ascii=False))
+            .replace("__FG__", "#d7dbe0" if dark else "#3b3a42")
+            .replace("__GRID__", "rgba(128,128,128,.22)"))
+    if hasattr(st, "iframe"):          # components.v1.html đã bị Streamlit loại bỏ dần -> ưu tiên st.iframe
+        st.iframe(html, height=height)
+    else:
+        components.html(html, height=height)
