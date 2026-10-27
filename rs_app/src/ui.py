@@ -305,85 +305,65 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
     return fig
 
 
-# ---------------------------------------------------------------- Biểu đồ giá kiểu TradingView
-# Dùng TradingView Lightweight Charts v5.2.1 (Apache-2.0; yêu cầu ghi công TradingView -> giữ nguyên logo trên biểu đồ).
-# Kéo chuột = di chuyển · lăn chuột = zoom quanh con trỏ · kéo trên trục = co giãn · trục giá tự khớp vùng đang xem.
+# ---------------------------------------------------------------- Biểu đồ kiểu TradingView
+# TradingView Lightweight Charts v5.2.1 (Apache-2.0; giữ nguyên logo TradingView trên biểu đồ để ghi công).
+# Kéo = di chuyển · lăn chuột = zoom quanh con trỏ · kéo trên trục = co giãn · các ngăn dùng chung trục thời gian.
+_LWC_VER = "5.2.1"
 _TV_HTML = """<!doctype html><meta charset="utf-8">
 <style>html,body{margin:0;height:100%;background:transparent;font:12px system-ui,sans-serif;overflow:hidden}
 #c{position:absolute;inset:0}
 #t{position:absolute;left:10px;top:6px;z-index:3;font-weight:600;color:__FG__;pointer-events:none}
-#o{position:absolute;left:10px;top:24px;z-index:3;color:__FG__;opacity:.85;font-size:11px;pointer-events:none}
+#o{position:absolute;left:10px;top:24px;right:90px;z-index:3;color:__FG__;font-size:11px;line-height:1.5;pointer-events:none}
 #r{position:absolute;right:62px;top:6px;z-index:3;border:1px solid __GRID__;background:transparent;color:__FG__;
 border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}</style>
 <div id="c"></div><div id="t"></div><div id="o"></div><button id="r" title="Về mặc định">⟲ Reset</button>
 __LIB__
 <script>
-const D = __DATA__, FG = "__FG__", GRID = "__GRID__", L = LightweightCharts;
+const D = __DATA__, FG = "__FG__", GRID = "__GRID__", L = LightweightCharts, UP = "#16a34a", DN = "#dc2626";
 document.getElementById("t").textContent = D.title;
 const chart = L.createChart(document.getElementById("c"), {
   autoSize: true,
   layout: { background: { type: "solid", color: "transparent" }, textColor: FG, fontFamily: "system-ui, sans-serif",
             panes: { separatorColor: GRID } },
   grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
-  rightPriceScale: { borderColor: GRID },
+  leftPriceScale: { visible: D.left, borderColor: GRID }, rightPriceScale: { borderColor: GRID },
   timeScale: { borderColor: GRID, rightOffset: 6, minBarSpacing: 0.4 },
   crosshair: { mode: L.CrosshairMode.Normal }
 });
-const UP = "#16a34a", DN = "#dc2626";
-const cs = chart.addSeries(L.CandlestickSeries, { upColor: UP, downColor: DN, borderUpColor: UP, borderDownColor: DN,
-  wickUpColor: UP, wickDownColor: DN });
-cs.setData(D.c);
-const vs = chart.addSeries(L.HistogramSeries, { priceFormat: { type: "volume" }, lastValueVisible: false,
-  priceLineVisible: false }, 1);
-vs.setData(D.v);
-const line = (color, data) => { const s = chart.addSeries(L.LineSeries, { color, lineWidth: 1, lastValueVisible: false,
-  priceLineVisible: false, crosshairMarkerVisible: false }, 1); s.setData(data); return s; };
-line("#f59e0b", D.m5); line("#7B61FF", D.m20);
-const panes = chart.panes(); panes[0].setStretchFactor(3); if (panes[1]) panes[1].setStretchFactor(1);
+const H = [];
+D.panes.forEach((p, pi) => p.series.forEach(s => {
+  const o = { priceLineVisible: false, lastValueVisible: false, priceScaleId: s.scale || "right" };
+  let T;
+  if (s.type === "candle") { T = L.CandlestickSeries; Object.assign(o, { upColor: UP, downColor: DN, borderUpColor: UP,
+    borderDownColor: DN, wickUpColor: UP, wickDownColor: DN }); }
+  else if (s.type === "hist") { T = L.HistogramSeries; Object.assign(o, { color: s.color || "#888",
+    priceFormat: s.fmt === "vol" ? { type: "volume" } : { type: "price" } }); }
+  else { T = L.LineSeries; Object.assign(o, { color: s.color, lineWidth: s.width || 1.5, crosshairMarkerVisible: false }); }
+  const ser = chart.addSeries(T, o, pi); ser.setData(s.data);
+  s.m = {}; s.data.forEach(x => s.m[x.time] = x); H.push([s, ser]);
+}));
+const ps = chart.panes(); D.panes.forEach((p, i) => ps[i] && ps[i].setStretchFactor(p.weight || 1));
 chart.timeScale().fitContent();
 
-const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n);
-const vol = {}; D.v.forEach(x => vol[x.time] = x.value);
-function show(time, b) {
-  if (!b) return;
-  const c = b.close >= b.open ? UP : DN;
-  document.getElementById("o").innerHTML = time + " &nbsp; M " + b.open + " &nbsp; C " + b.high + " &nbsp; T " + b.low +
-    " &nbsp; Đ <b style='color:" + c + "'>" + b.close + "</b> &nbsp; KL " + fmt(vol[time] || 0);
+const fmtV = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n);
+const tkey = t => typeof t === "object" && t ? t.year + "-" + String(t.month).padStart(2, "0") + "-" + String(t.day).padStart(2, "0") : t;
+function show(t) {
+  const out = [t];
+  H.forEach(([s]) => {
+    const x = s.m[t]; if (!x || s.title === undefined) return;
+    let txt;
+    if (s.type === "candle") { const c = x.close >= x.open ? UP : DN;
+      txt = (s.title ? s.title + " " : "") + "M " + x.open + " C " + x.high + " T " + x.low + " Đ <b style='color:" + c + "'>" + x.close + "</b>"; }
+    else { const v = s.fmt === "vol" ? fmtV(x.value) : Number(x.value).toFixed(s.dec === undefined ? 2 : s.dec);
+      txt = "<span style='color:" + (s.color || FG) + "'>" + s.title + "</span> " + v; }
+    out.push(txt);
+  });
+  document.getElementById("o").innerHTML = out.join(" &nbsp; ");
 }
-const last = D.c[D.c.length - 1]; show(last.time, last);
-chart.subscribeCrosshairMove(p => { const b = p.seriesData && p.seriesData.get(cs); if (b && p.time) show(p.time, b); else show(last.time, last); });
+const first = D.panes[0].series[0].data, lastT = first[first.length - 1].time; show(lastT);
+chart.subscribeCrosshairMove(p => { show(p.time ? tkey(p.time) : lastT); });
 document.getElementById("r").onclick = () => { chart.priceScale("right").applyOptions({ autoScale: true }); chart.timeScale().fitContent(); };
 </script>"""
-
-
-def _tv_payload(ohlcv: pd.DataFrame, title: str) -> dict:
-    d = ohlcv.dropna(subset=["open", "high", "low", "close"]).copy()
-    d.index = pd.to_datetime(d.index)
-    d = d[~d.index.duplicated(keep="last")].sort_index()
-    t = d.index.strftime("%Y-%m-%d")
-    vol = d["volume"].fillna(0)
-    rnd = lambda s: [round(float(x), 4) for x in s]
-    c = [{"time": ti, "open": o, "high": h, "low": l, "close": cl}
-         for ti, o, h, l, cl in zip(t, rnd(d["open"]), rnd(d["high"]), rnd(d["low"]), rnd(d["close"]))]
-    v = [{"time": ti, "value": float(x), "color": "rgba(22,163,74,.45)" if cl >= o else "rgba(220,38,38,.45)"}
-         for ti, x, o, cl in zip(t, vol, d["open"], d["close"])]
-    ma = lambda n: [{"time": ti, "value": round(float(x), 2)} for ti, x in zip(t, vol.rolling(n).mean()) if pd.notna(x)]
-    return {"title": title, "c": c, "v": v, "m5": ma(5), "m20": ma(20)}
-
-
-_LWC_VER = "5.2.1"
-
-
-def _lwc_script() -> str:
-    """Thư viện nhúng thẳng vào trang (không phụ thuộc phục vụ file tĩnh của Streamlit); thiếu file thì dùng CDN."""
-    import functools
-    from pathlib import Path
-    f = Path(__file__).resolve().parent.parent / "static" / "lightweight-charts.standalone.production.js"
-    try:
-        code = _lwc_read(str(f))
-        return "<script>" + code.replace("</script", "<\\/script") + "</script>"
-    except OSError:
-        return f'<script src="https://unpkg.com/lightweight-charts@{_LWC_VER}/dist/lightweight-charts.standalone.production.js"></script>'
 
 
 @__import__("functools").lru_cache(maxsize=1)
@@ -392,19 +372,79 @@ def _lwc_read(path: str) -> str:
         return fh.read()
 
 
-def price_chart(ohlcv: pd.DataFrame, title: str, height: int = 560) -> None:
-    """Vẽ biểu đồ giá. Đặt biến môi trường CHART_ENGINE=plotly để quay lại biểu đồ Plotly cũ."""
+def _lwc_script() -> str:
+    """Thư viện nhúng thẳng vào trang (không phụ thuộc phục vụ file tĩnh); thiếu file thì dùng CDN."""
+    from pathlib import Path
+    f = Path(__file__).resolve().parent.parent / "static" / "lightweight-charts.standalone.production.js"
+    try:
+        return "<script>" + _lwc_read(str(f)).replace("</script", "<\\/script") + "</script>"
+    except OSError:
+        return f'<script src="https://unpkg.com/lightweight-charts@{_LWC_VER}/dist/lightweight-charts.standalone.production.js"></script>'
+
+
+def _tv_clean(obj, cols=None):
+    d = obj.dropna(subset=cols) if cols else obj.dropna()
+    d = d.copy()
+    d.index = pd.to_datetime(d.index)
+    return d[~d.index.duplicated(keep="last")].sort_index()
+
+
+def tv_candles(df: pd.DataFrame, title: str = "", scale: str = "right") -> dict:
+    d = _tv_clean(df, ["open", "high", "low", "close"])
+    t = d.index.strftime("%Y-%m-%d")
+    data = [{"time": a, "open": round(float(o), 4), "high": round(float(h), 4), "low": round(float(l), 4),
+             "close": round(float(c), 4)} for a, o, h, l, c in zip(t, d["open"], d["high"], d["low"], d["close"])]
+    return {"type": "candle", "data": data, "title": title, "scale": scale}
+
+
+def tv_line(s: pd.Series, color: str, title: str = "", width: float = 1.5, scale: str = "right", dec: int = 2) -> dict:
+    d = _tv_clean(s.dropna())
+    data = [{"time": a, "value": round(float(v), 4)} for a, v in zip(d.index.strftime("%Y-%m-%d"), d)]
+    return {"type": "line", "data": data, "color": color, "title": title, "width": width, "scale": scale, "dec": dec}
+
+
+def tv_hist(s: pd.Series, title: str = "", up: "pd.Series | None" = None, color: str = "rgba(128,128,128,.55)") -> dict:
+    d = _tv_clean(s.fillna(0))
+    flag = up.reindex(d.index) if up is not None else None
+    data = []
+    for i, (a, v) in enumerate(zip(d.index.strftime("%Y-%m-%d"), d)):
+        p = {"time": a, "value": float(v)}
+        if flag is not None:
+            p["color"] = "rgba(22,163,74,.45)" if bool(flag.iloc[i]) else "rgba(220,38,38,.45)"
+        data.append(p)
+    return {"type": "hist", "data": data, "color": color, "title": title, "fmt": "vol"}
+
+
+def tv_chart(title: str, panes: list, height: int = 560) -> None:
+    """panes = [{"weight": 3, "series": [tv_candles(...), tv_line(...), ...]}, ...]"""
     import json
-    import os
-    import streamlit.components.v1 as components
-    if os.environ.get("CHART_ENGINE") == "plotly":
-        st.plotly_chart(candle_chart(ohlcv, title), width="stretch")
+    panes = [p for p in panes if any(s["data"] for s in p["series"])]
+    if not panes:
+        st.info("Chưa có dữ liệu để vẽ biểu đồ.")
         return
+    left = any(s.get("scale") == "left" for p in panes for s in p["series"])
     dark = getattr(st.context.theme, "type", None) == "dark"
-    html = (_TV_HTML.replace("__LIB__", _lwc_script()).replace("__DATA__", json.dumps(_tv_payload(ohlcv, title), ensure_ascii=False))
-            .replace("__FG__", "#d7dbe0" if dark else "#3b3a42")
-            .replace("__GRID__", "rgba(128,128,128,.22)"))
+    html = (_TV_HTML.replace("__LIB__", _lwc_script())
+            .replace("__DATA__", json.dumps({"title": title, "panes": panes, "left": left}, ensure_ascii=False))
+            .replace("__FG__", "#d7dbe0" if dark else "#3b3a42").replace("__GRID__", "rgba(128,128,128,.22)"))
     if hasattr(st, "iframe"):          # components.v1.html đã bị Streamlit loại bỏ dần -> ưu tiên st.iframe
         st.iframe(html, height=height)
     else:
+        import streamlit.components.v1 as components
         components.html(html, height=height)
+
+
+def price_chart(ohlcv: pd.DataFrame, title: str, height: int = 560) -> None:
+    """Biểu đồ giá: nến + khối lượng (TB5, TB20). CHART_ENGINE=plotly để quay lại Plotly cũ."""
+    import os
+    if os.environ.get("CHART_ENGINE") == "plotly":
+        st.plotly_chart(candle_chart(ohlcv, title), width="stretch")
+        return
+    d = _tv_clean(ohlcv, ["open", "high", "low", "close"])
+    vol = d["volume"].fillna(0)
+    tv_chart(title, [
+        {"weight": 3, "series": [tv_candles(d)]},
+        {"weight": 1, "series": [tv_hist(vol, "KL", up=d["close"] >= d["open"]),
+                                 tv_line(vol.rolling(5).mean(), "#f59e0b", "TB5", 1, dec=0),
+                                 tv_line(vol.rolling(20).mean(), "#7B61FF", "TB20", 1, dec=0)]},
+    ], height)
