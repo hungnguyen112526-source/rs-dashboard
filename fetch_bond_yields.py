@@ -1,5 +1,5 @@
 """
-Lấy lợi suất trái phiếu chính phủ 30 năm của nhiều quốc gia từ TradingView qua thư viện
+Lấy lợi suất trái phiếu chính phủ kỳ hạn 2, 10 và 30 năm của nhiều quốc gia từ TradingView qua thư viện
 tvdatafeed (không chính thức, đăng nhập ẩn danh) -> bond_yields.json, để generate_report.py
 vẽ biểu đồ so sánh trên trang Vĩ mô.
 
@@ -16,18 +16,12 @@ OUTPUT_FILE = "bond_yields.json"
 N_BARS = 800
 VN_TZ = timezone(timedelta(hours=7))
 
-# (mã TradingView, sàn, nhãn hiển thị)
-BONDS = [
-    ("US30Y", "TVC", "Mỹ"),
-    ("JP30Y", "TVC", "Nhật"),
-    ("GB30Y", "TVC", "Anh"),
-    ("DE30Y", "TVC", "Đức"),
-    ("FR30Y", "TVC", "Pháp"),
-    ("KR30Y", "TVC", "Hàn Quốc"),
-    ("AU30Y", "TVC", "Úc"),
-    ("NL30Y", "TVC", "Hà Lan"),
-    ("CN30Y", "TVC", "Trung Quốc"),
-]
+# (mã quốc gia TradingView, sàn, nhãn hiển thị); mã trái phiếu = <mã nước><kỳ hạn>Y, vd US10Y, GB02Y
+COUNTRIES = [("US", "TVC", "Mỹ"), ("JP", "TVC", "Nhật"), ("GB", "TVC", "Anh"), ("DE", "TVC", "Đức"),
+             ("FR", "TVC", "Pháp"), ("KR", "TVC", "Hàn Quốc"), ("AU", "TVC", "Úc"), ("NL", "TVC", "Hà Lan"),
+             ("CN", "TVC", "Trung Quốc")]
+# khoá trong JSON -> kỳ hạn. "series" (30 năm) giữ nguyên tên để generate_report.py (trang tĩnh) không bị ảnh hưởng.
+TENORS = {"series": "30", "series_10y": "10", "series_2y": "02"}
 
 
 def fetch_one(tv, symbol, exchange):
@@ -45,24 +39,34 @@ def fetch_one(tv, symbol, exchange):
 
 def main():
     tv = TvDatafeed()  # ẩn danh: đủ cho dữ liệu TVC, có thể bị giới hạn số nến
-    series = {}
-    for symbol, exchange, label in BONDS:
-        data = fetch_one(tv, symbol, exchange)
-        if data:
-            series[symbol] = {"label": label, "data": data}
-            print(f"  {symbol} ({label}): {len(data)} tuần, gần nhất {data[-1]}")
-        else:
-            print(f"  {symbol} ({label}): không lấy được")
-        time.sleep(1)
+    try:
+        with open(OUTPUT_FILE, encoding="utf-8") as f:
+            old = json.load(f)
+    except (OSError, ValueError):
+        old = {}
+    out = {}
+    for key, ten in TENORS.items():
+        series = {}
+        for cc, exchange, label in COUNTRIES:
+            symbol = f"{cc}{ten}Y"
+            data = fetch_one(tv, symbol, exchange)
+            if data:
+                series[symbol] = {"label": label, "data": data}
+                print(f"  {symbol} ({label}): {len(data)} tuần, gần nhất {data[-1]}")
+            else:
+                print(f"  {symbol} ({label}): không lấy được")
+            time.sleep(1)
+        # kỳ hạn nào lần này không lấy được gì thì giữ dữ liệu cũ, không ghi đè bằng rỗng
+        out[key] = series or old.get(key) or {}
 
-    if not series:
-        print("CẢNH BÁO: không lấy được nước nào - giữ nguyên file cũ (nếu có).")
+    if not any(out.values()):
+        print("CẢNH BÁO: không lấy được gì - giữ nguyên file cũ (nếu có).")
         return
 
-    out = {"updated_at": datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M"), "series": series}
+    out = {"updated_at": datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M"), **{k: v for k, v in out.items() if v}}
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"Đã lưu {OUTPUT_FILE} ({len(series)}/{len(BONDS)} nước)")
+    print("Đã lưu " + OUTPUT_FILE + ": " + ", ".join(f"{k}={len(v)} nước" for k, v in out.items() if k != "updated_at"))
 
 
 if __name__ == "__main__":
