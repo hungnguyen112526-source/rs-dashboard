@@ -52,9 +52,9 @@ h1 { line-height: 1.15 !important; }
             border-radius: 14px; padding: .7rem .9rem; font-size: .85rem; opacity: .9; }
 .asof { opacity: .7; font-size: .85rem; margin-bottom: .4rem; }
 
-.auth-logo { width: 54px; height: 54px; margin: 0 auto .6rem; border-radius: 18px; display: flex; align-items: center;
-             justify-content: center; font-size: 1.7rem; background: linear-gradient(120deg,#7B61FF,#3D8BFF 55%,#1FB89A);
-             box-shadow: 0 10px 24px -10px rgba(123,97,255,.7); }
+.auth-logo { width: 76px; height: 76px; margin: 0 auto .7rem; border-radius: 22px; overflow: hidden;
+             box-shadow: 0 10px 24px -10px rgba(0,0,0,.55); }
+.auth-logo img { display: block; width: 100%; height: 100%; }
 .auth-head { text-align: center; margin-bottom: .6rem; }
 .auth-foot { text-align: center; font-size: .75rem; opacity: .55; margin-top: .8rem; }
 
@@ -99,12 +99,24 @@ AUTH_CSS = """
 """
 
 
+@__import__("functools").lru_cache(maxsize=1)
+def _logo_b64() -> str:
+    """Logo nhúng thẳng vào HTML (base64) để không phụ thuộc đường dẫn tĩnh."""
+    import base64
+    from pathlib import Path
+    f = Path(__file__).resolve().parent.parent / "assets" / "logo-160.png"
+    try:
+        return base64.b64encode(f.read_bytes()).decode()
+    except OSError:
+        return ""
+
+
 def render_auth_portal():
     """Cổng đăng nhập: thẻ gọn ở giữa trang, không sidebar."""
     st.markdown(AUTH_CSS, unsafe_allow_html=True)
     with st.container(border=True, key="card_auth"):
         st.markdown(
-            '<div class="auth-head"><div class="auth-logo">📈</div>'
+            f'<div class="auth-head"><div class="auth-logo"><img src="data:image/png;base64,{_logo_b64()}" alt=""></div>'
             '<div class="auth-title">CHỨNG KHOÁN SUNG RỤNG</div>'
             '<div class="auth-sub">Xếp hạng sức mạnh giá · Lọc khối lượng · Cổ phiếu Việt Nam</div></div>',
             unsafe_allow_html=True,
