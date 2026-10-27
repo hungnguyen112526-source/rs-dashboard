@@ -12,7 +12,10 @@ if str(ROOT) not in sys.path:
 
 from src import auth, engine, night, pages_extra, ui  # noqa: E402
 
-st.set_page_config(page_title="Chứng khoán sung rụng", page_icon="📈", layout="wide", initial_sidebar_state="auto")
+ASSETS = ROOT / "assets"
+st.set_page_config(page_title="Chứng khoán sung rụng", page_icon=str(ASSETS / "favicon-192.png"),
+                   layout="wide", initial_sidebar_state="auto")
+st.logo(str(ASSETS / "logo.png"), size="large")
 ui.apply_css()
 
 auth.ensure_admin()
