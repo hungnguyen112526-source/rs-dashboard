@@ -182,29 +182,13 @@ def _flow_cached(path_str: str, mtime: float, kind: str, name: str, _stocks: pd.
     return engine.money_flow_index(d[cols])
 
 
-def _flow_chart(idx: pd.DataFrame, mode: str, vn_close: pd.Series | None, title: str) -> go.Figure:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.76, 0.24], vertical_spacing=0.03,
-                        specs=[[{"secondary_y": True}], [{"secondary_y": False}]])
-    if mode == "Nến":
-        fig.add_trace(go.Candlestick(x=idx.index, open=idx["open"], high=idx["high"], low=idx["low"],
-                                     close=idx["close"], name="Chỉ số dòng tiền",
-                                     increasing_line_color=GREEN, decreasing_line_color=RED),
-                      row=1, col=1, secondary_y=False)
-    else:
-        fig.add_trace(go.Scatter(x=idx.index, y=idx["close"], mode="lines", name="Chỉ số dòng tiền",
-                                 line=dict(color=BLUE, width=2)), row=1, col=1, secondary_y=False)
-    if vn_close is not None and not vn_close.empty:
-        fig.add_trace(go.Scatter(x=vn_close.index, y=vn_close.values, mode="lines", name="VNIndex (trục trái)",
-                                 line=dict(color=AMBER, width=1.5, dash="dash")), row=1, col=1, secondary_y=True)
-    fig.add_trace(go.Bar(x=idx.index, y=idx["value"], name="GTGD (tỷ đồng)",
-                         marker_color="rgba(128,128,128,.45)"), row=2, col=1)
-    fig.update_layout(title=title, height=520, margin=dict(l=10, r=10, t=40, b=10), xaxis_rangeslider_visible=False,
-                      legend=dict(orientation="h", y=-0.04, x=1, xanchor="right"), hovermode="x unified")
-    _style_axes(fig)
-    fig.update_yaxes(side="right", row=1, col=1, secondary_y=False, title_text="Điểm")
-    fig.update_yaxes(side="left", row=1, col=1, secondary_y=True, showgrid=False)
-    fig.update_yaxes(title_text="Tỷ đồng", row=2, col=1)
-    return fig
+def _flow_panes(idx: pd.DataFrame, mode: str, vn: pd.DataFrame | None) -> list:
+    main = ui.tv_candles(idx, "Dòng tiền") if mode == "Nến" else ui.tv_line(idx["close"], BLUE, "Dòng tiền", 2, dec=1)
+    panes = [{"weight": 3, "series": [main]}]
+    if vn is not None and not vn.empty:
+        panes.append({"weight": 2, "series": [ui.tv_candles(vn, "VN-Index")]})
+    panes.append({"weight": 1, "series": [ui.tv_hist(idx["value"], "GTGD (tỷ đồng)")]})
+    return panes
 
 
 def render_flow(stocks: pd.DataFrame, vnindex: pd.DataFrame, path_str: str, mtime: float):
@@ -246,9 +230,9 @@ def render_flow(stocks: pd.DataFrame, vnindex: pd.DataFrame, path_str: str, mtim
     view = idx.tail(n) if n else idx
     vn_close = None
     if show_vn and not vnindex.empty:
-        vn_close = vnindex.sort_values("date").set_index("date")["close"].loc[view.index.min():]
+        vn_close = vnindex.sort_values("date").set_index("date")[["open", "high", "low", "close"]].loc[view.index.min():]
     with st.container(border=True, key="card_flow_chart"):
-        st.plotly_chart(_flow_chart(view, mode, vn_close, f"{name} — chỉ số dòng tiền"), width="stretch")
+        ui.tv_chart(f"{name} — chỉ số dòng tiền", _flow_panes(view, mode, vn_close), height=640 if vn_close is not None else 520)
 
     with st.expander("📖 Chỉ số này tính thế nào?"):
         st.markdown(
@@ -363,21 +347,29 @@ def _series_df(entry: dict) -> tuple[pd.DataFrame, bool]:
     return df.dropna(subset=["date", "close"]).set_index("date").sort_index(), ohlc
 
 
+BOND_TENORS = {"2N": "series_2y", "10N": "series_10y", "30N": "series"}
+BOND_COLORS = ["#4cc9f0", "#4361ee", "#f72585", "#e63946", "#80ed99", "#2a9d8f", "#ffbe0b", "#fb8500", "#9d4edd"]
+
+
 def _bond_card(bonds):
     with st.container(border=True, key="card_macro_bond"):
-        st.subheader("🏦 Lợi suất trái phiếu chính phủ 30 năm")
-        series = (bonds or {}).get("series") or {}
-        if not series:
+        st.subheader("🏦 Lợi suất trái phiếu chính phủ")
+        if not (bonds or {}).get("series"):
             _missing("bond_yields.json", "Cập nhật dữ liệu (update_data)")
             return
         st.caption(f"Nguồn: TradingView (TVC) · dữ liệu theo tuần · Cập nhật lần cuối: {bonds.get('updated_at', '–')}")
+        t1, t2 = st.columns([2, 3], vertical_alignment="bottom")
+        tenor = t1.segmented_control("Kỳ hạn", list(BOND_TENORS), default="30N", key="macro_bond_tenor") or "30N"
+        rng = t2.segmented_control("Khoảng", MACRO_RANGES, default="5N", key="macro_bond_rng") or "5N"
+        series = bonds.get(BOND_TENORS[tenor]) or {}
+        if not series:
+            st.info(f"Chưa có dữ liệu kỳ hạn {tenor}. Chạy workflow 'Cập nhật dữ liệu' để lấy.")
+            return
         labels = {k: v.get("label", k) for k, v in series.items()}
-        c1, c2 = st.columns([4, 2], vertical_alignment="bottom")
-        picked = c1.multiselect("Quốc gia", list(labels), default=list(labels), format_func=labels.get,
-                                key="macro_bond_pick")
-        rng = c2.segmented_control("Khoảng", MACRO_RANGES, default="5N", key="macro_bond_rng") or "5N"
-        fig, rows = go.Figure(), []
-        for k in picked:
+        picked = st.multiselect("Quốc gia", list(labels), default=list(labels), format_func=labels.get,
+                                key=f"macro_bond_pick_{tenor}")
+        lines, rows = [], []
+        for n, k in enumerate(picked):
             d = pd.DataFrame(series[k].get("data") or [], columns=["date", "y"])
             if d.empty:
                 continue
@@ -386,15 +378,11 @@ def _bond_card(bonds):
             rows.append({"Quốc gia": labels[k], "Lợi suất (%)": d["y"].iloc[-1],
                          "Thay đổi 4 tuần (điểm %)": d["y"].iloc[-1] - d["y"].iloc[-5] if len(d) > 4 else None,
                          "Ngày": d.index[-1].strftime("%d/%m/%Y")})
-            d = _clip_years(d, rng)
-            fig.add_trace(go.Scatter(x=d.index, y=d["y"], mode="lines", name=labels[k], line=dict(width=1.8)))
+            lines.append(ui.tv_line(_clip_years(d, rng)["y"], BOND_COLORS[n % len(BOND_COLORS)], labels[k], 1.8, dec=3))
         if not rows:
             st.info("Chọn ít nhất một quốc gia.")
             return
-        fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified",
-                          yaxis_title="%", legend=dict(orientation="h", y=-0.12))
-        _style_axes(fig, weekend_gaps=False)
-        st.plotly_chart(fig, width="stretch")
+        ui.tv_chart(f"Lợi suất {tenor.replace('N', ' năm')} (%)", [{"weight": 1, "series": lines}], height=460)
         tbl = pd.DataFrame(rows).sort_values("Lợi suất (%)", ascending=False)
         st.dataframe(tbl.style.format({"Lợi suất (%)": "{:.3f}", "Thay đổi 4 tuần (điểm %)": "{:+.3f}"}, na_rep="–"),
                      hide_index=True, width="stretch")
@@ -446,20 +434,25 @@ def _indicator_card(macro: dict):
             ("Số điểm dữ liệu", f"{len(df):,}", None),
         ])
         view = _clip_years(df, rng)
-        fig = go.Figure()
-        if ohlc:
-            fig.add_trace(go.Candlestick(x=view.index, open=view["open"], high=view["high"], low=view["low"],
-                                         close=view["close"], name=entry.get("label", key),
-                                         increasing_line_color=GREEN, decreasing_line_color=RED))
-        elif entry.get("freq") == "yearly":
-            fig.add_trace(go.Bar(x=view.index.year, y=view["close"], name=entry.get("label", key), marker_color=BLUE))
+        if entry.get("freq") != "yearly" or ohlc:
+            ttl = entry.get("label", key)
+            ui.tv_chart(ttl, [{"weight": 1, "series": [ui.tv_candles(view, "") if ohlc else ui.tv_line(view["close"], BLUE, ttl, 2, dec=3)]}], height=420)
         else:
-            fig.add_trace(go.Scatter(x=view.index, y=view["close"], mode="lines", name=entry.get("label", key),
-                                     line=dict(color=BLUE, width=2)))
-        fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False,
-                          showlegend=False, hovermode="x unified")
-        _style_axes(fig, weekend_gaps=False)
-        st.plotly_chart(fig, width="stretch")
+            view = _clip_years(df, rng)
+            fig = go.Figure()
+            if ohlc:
+                fig.add_trace(go.Candlestick(x=view.index, open=view["open"], high=view["high"], low=view["low"],
+                                             close=view["close"], name=entry.get("label", key),
+                                             increasing_line_color=GREEN, decreasing_line_color=RED))
+            elif entry.get("freq") == "yearly":
+                fig.add_trace(go.Bar(x=view.index.year, y=view["close"], name=entry.get("label", key), marker_color=BLUE))
+            else:
+                fig.add_trace(go.Scatter(x=view.index, y=view["close"], mode="lines", name=entry.get("label", key),
+                                         line=dict(color=BLUE, width=2)))
+            fig.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False,
+                              showlegend=False, hovermode="x unified")
+            _style_axes(fig, weekend_gaps=False)
+            st.plotly_chart(fig, width="stretch")
         if entry.get("description"):
             st.caption(entry["description"])
 
