@@ -13,9 +13,12 @@ if str(ROOT) not in sys.path:
 from src import auth, engine, night, pages_extra, ui  # noqa: E402
 
 ASSETS = ROOT / "assets"
-st.set_page_config(page_title="Chứng khoán sung rụng", page_icon=str(ASSETS / "favicon-192.png"),
+_FAVICON, _LOGO = ASSETS / "favicon-192.png", ASSETS / "logo.png"
+# thiếu file ảnh thì dùng emoji / bỏ logo sidebar, không để app sập
+st.set_page_config(page_title="Chứng khoán sung rụng", page_icon=str(_FAVICON) if _FAVICON.is_file() else "📈",
                    layout="wide", initial_sidebar_state="auto")
-st.logo(str(ASSETS / "logo.png"), size="large")
+if _LOGO.is_file():
+    st.logo(str(_LOGO), size="large")
 ui.apply_css()
 
 auth.ensure_admin()
