@@ -10,7 +10,9 @@ import pandas as pd
 BLOCK_SIZE = 30
 WEEKLY_BLOCK_SIZE = 20
 BLOCK_WEIGHTS = [0.4, 0.3, 0.2, 0.1]
-VOL_WINDOWS = [5, 10, 20, 40]
+VOL_WINDOWS = [10, 20, 30, 50]
+TB_COLS = [f"TB{w}" for w in VOL_WINDOWS]
+PCT_COL = f"% TB{VOL_WINDOWS[0]} so với TB{VOL_WINDOWS[-1]}"
 VN_TZ = timezone(timedelta(hours=7))
 
 
@@ -101,7 +103,7 @@ def _chain(v: np.ndarray):
 
 def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None, min_tiers: int = 3):
     """Trả về (bảng_ngày, bảng_tuần, mốc_ngày_cuối, mốc_tuần_cuối).
-    Điều kiện đủ: TB5 < TB10 < TB20 < TB40 (4 mốc). 3 mốc = TB5<TB10<TB20 nhưng chưa < TB40.
+    Điều kiện đủ: TB10 < TB20 < TB30 < TB50 (4 mốc). 3 mốc = TB10<TB20<TB30 nhưng chưa < TB50.
     Bỏ phiên/tuần chưa kết thúc. Không lọc thanh khoản; GTGD TB20 chỉ để tham khảo."""
     now_vn = now_vn or datetime.now(VN_TZ)
     today, session_open = now_vn.date(), now_vn.hour < 15
@@ -125,8 +127,8 @@ def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None
                 return
             mas, tiers = res
             rows[frame].append({
-                "Mã": ticker, "Ngành": ind, "TB5": mas[0], "TB10": mas[1], "TB20": mas[2], "TB40": mas[3],
-                "% TB5 so với TB40": (mas[0] / mas[3] - 1) * 100 if mas[3] else None,
+                "Mã": ticker, "Ngành": ind, **dict(zip(TB_COLS, mas)),
+                PCT_COL: (mas[0] / mas[3] - 1) * 100 if mas[3] else None,
                 "Số mốc đạt": tiers,
                 "GTGD TB20 (tỷ)": gtgd,
                 "RS": rs,
@@ -145,6 +147,47 @@ def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None
     return (day, week,
             max(last_d).strftime("%d/%m/%Y") if last_d else None,
             max(last_w).strftime("%d/%m/%Y") if last_w else None)
+
+
+def volume_exits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = False, now_vn: datetime | None = None):
+    """Các mã RỜI danh sách lọc (đủ 4 mốc) trong khoảng [start, end].
+    Một lượt rời = phiên/tuần t-1 còn đủ TB10<TB20<TB30<TB50 nhưng phiên/tuần t thì không. Bỏ phiên/tuần chưa kết thúc."""
+    now_vn = now_vn or datetime.now(VN_TZ)
+    today, session_open = now_vn.date(), now_vn.hour < 15
+    start, end = pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize()
+    unit = "tuần" if weekly else "phiên"
+    base = df[["date", "ticker", "volume", "industry"]].dropna(subset=["volume"]).sort_values(["ticker", "date"])
+    out = []
+    for ticker, g in base.groupby("ticker"):
+        v = g.set_index("date")["volume"].astype(float)
+        if len(v) and v.index[-1].date() == today and session_open:
+            v = v.iloc[:-1]
+        if weekly:
+            v = v.resample("W-FRI").sum(min_count=1).dropna()
+            if len(v) and (v.index[-1].date() > today or (v.index[-1].date() == today and session_open)):
+                v = v.iloc[:-1]
+        if len(v) <= VOL_WINDOWS[-1]:
+            continue
+        ma = [v.rolling(w).mean() for w in VOL_WINDOWS]
+        ok = (ma[0] < ma[1]) & (ma[1] < ma[2]) & (ma[2] < ma[3])
+        run = ok.groupby((ok != ok.shift()).cumsum()).cumsum()          # độ dài chuỗi liên tiếp trong danh sách
+        exits = ok.index[ok.shift(1, fill_value=False) & ~ok]
+        for d in exits:
+            if not (start <= d.normalize() <= end):
+                continue
+            i = ok.index.get_loc(d)
+            n = int(run.iloc[i - 1])
+            out.append({
+                "Mã": ticker, "Ngành": g["industry"].iloc[-1], "RS": rs_map.get(ticker),
+                "_d": d, "Ngày vào DS": ok.index[i - n].strftime("%d/%m/%Y"), "Ngày rời DS": d.strftime("%d/%m/%Y"),
+                f"Số {unit} trong DS": n,
+                PCT_COL + " (khi rời)": (ma[0].iloc[i] / ma[3].iloc[i] - 1) * 100,
+                "Hiện trạng": "Đang trong DS" if bool(ok.iloc[-1]) else "Đã ngoài DS",
+            })
+    res = pd.DataFrame(out)
+    if res.empty:
+        return res
+    return res.sort_values(["_d", "Mã"], ascending=[False, True]).drop(columns="_d").reset_index(drop=True)
 
 
 # ----------------------------------------------------------------------------
