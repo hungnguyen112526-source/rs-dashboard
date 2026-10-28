@@ -1,6 +1,6 @@
-"""Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
+="""Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from src import auth, engine, night, pages_extra, ui  # noqa: E402
 
-ASSETS = ROOT / "assets"
+ASSETS = next((d for d in (ROOT / "assets", ROOT.parent / "assets") if d.is_dir()), ROOT / "assets")
 _FAVICON, _LOGO = ASSETS / "favicon-192.png", ASSETS / "logo.png"
 # thiếu file ảnh thì dùng emoji / bỏ logo sidebar, không để app sập
 st.set_page_config(page_title="Chứng khoán sung rụng", page_icon=str(_FAVICON) if _FAVICON.is_file() else "📈",
@@ -80,6 +80,14 @@ def cached_vol(path_str: str, mtime: float, hour_bucket: str):
     return engine.volume_screen(s, rs_map)
 
 
+@st.cache_data(ttl=600)
+def cached_exits(path_str: str, mtime: float, start: str, end: str, weekly: bool, hour_bucket: str):
+    s, _ = load_all(path_str, mtime)
+    scores, _ = cached_rs(path_str, mtime, "day")
+    rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
+    return engine.volume_exits(s, rs_map, start, end, weekly)
+
+
 # ---- Biểu đồ trong cửa sổ nổi ----
 def show_chart(ticker: str, key: str):
     frame = st.radio("Khung biểu đồ", ["Ngày", "Tuần"], horizontal=True, key=f"{key}_tf")
@@ -122,7 +130,8 @@ def table_with_select(frame_df: pd.DataFrame, key: str, display=None, column_con
     reopen = bool(ss.get(ka)) and c2.button(f"📈 Mở lại biểu đồ {ss.get(ka)}", key=f"{key}_reopen", width="stretch")
     st.caption("Hoặc **tick ô vuông ở đầu dòng** (cột ngoài cùng bên trái). Bấm vào chữ trong ô thì chưa chọn dòng.")
     event = st.dataframe(display if display is not None else frame_df, width="stretch", hide_index=True,
-                         key=key, on_select="rerun", selection_mode="single-row", column_config=column_config)
+                         key=key, on_select="rerun", selection_mode="single-row", column_config=column_config,
+                         **tbl_dims(len(frame_df)))
 
     rows = event.selection.rows
     cur_t = frame_df.iloc[rows[0]]["Mã"] if rows else None
@@ -139,15 +148,35 @@ def table_with_select(frame_df: pd.DataFrame, key: str, display=None, column_con
         open_chart(frame_df, target, key)
 
 
+W = engine.VOL_WINDOWS
+TB_RULE = f"TB{W[0]} < TB{W[1]} < TB{W[2]}"
+
+
+# Cỡ bảng: (chiều cao tối đa px, độ cao dòng px). None = tự tính theo số dòng ("Toàn trang").
+TBL_SIZES = {"Gọn": (400, None), "Vừa": (640, 40), "Lớn": (900, 46), "Toàn trang": (None, 44)}
+
+
+def tbl_dims(n_rows: int) -> dict:
+    """Tham số height/row_height cho st.dataframe theo cỡ bảng người dùng chọn; bảng ngắn không để khoảng trống."""
+    h, rh = TBL_SIZES.get(st.session_state.get("tbl_size") or "Vừa", TBL_SIZES["Vừa"])
+    content = (rh or 35) * (n_rows + 1) + 8
+    kw = {"height": int(min(h, content) if h else min(content, 5000))}
+    if rh:
+        kw["row_height"] = rh
+    return kw
+
+
 def frame_filters(with_near: bool = False, key: str = "f"):
     """Bộ lọc 1 hàng: khung thời gian · (mã gần đạt) · tìm kiếm."""
-    widths = [2, 3, 3] if with_near else [2, 4]
+    widths = [2, 3, 3, 3] if with_near else [2, 3, 4]
     cols = st.columns(widths, vertical_alignment="bottom")
     frame = cols[0].segmented_control("Khung", ["Ngày", "Tuần"], default="Ngày", key=f"{key}_frame") or "Ngày"
     near = False
     if with_near:
         near = cols[1].toggle("Hiện cả mã gần đạt (3/4 mốc)", key=f"{key}_near",
-                              help="TB5 < TB10 < TB20 nhưng chưa < TB40")
+                              help=f"{TB_RULE} nhưng chưa < TB{W[3]}")
+    cols[-2].segmented_control("Cỡ bảng", list(TBL_SIZES), default="Vừa", key="tbl_size",
+                               help="Phóng to bảng: tăng chiều cao và độ cao dòng để xem được nhiều mã hơn một lúc")
     q = cols[-1].text_input("Tìm kiếm", placeholder="🔍 Lọc theo mã hoặc ngành", key=f"{key}_q",
                             label_visibility="collapsed").strip().lower()
     return frame, near, q
@@ -204,7 +233,7 @@ def page_rs():
                                     "RS_nganh": "RS ngành", "so_ma": "Số mã"})
             v = _match(v, q, "Ngành").reset_index(drop=True)
             st.dataframe(v.style.apply(ui._zebra, axis=None).format({"Điểm thô ngành": "{:.2f}"}),
-                         width="stretch", hide_index=True,
+                         width="stretch", hide_index=True, **tbl_dims(len(v)),
                          column_config={"RS ngành": st.column_config.ProgressColumn("RS ngành", min_value=1,
                                                                                     max_value=99, format="%d")})
 
@@ -221,7 +250,7 @@ def page_vol():
     ui.kpi_row([
         ("Mã đủ 4 mốc · Ngày", f"{_n(day_df, 4)}", f"Tính đến {last_d}" if last_d else None),
         ("Mã đủ 4 mốc · Tuần", f"{_n(week_df, 4)}", f"Tính đến {last_w}" if last_w else None),
-        ("Mã gần đạt (3/4) · Ngày", f"{_n(day_df, 3)}", "TB5 < TB10 < TB20 nhưng chưa < TB40"),
+        ("Mã gần đạt (3/4) · Ngày", f"{_n(day_df, 3)}", f"{TB_RULE} nhưng chưa < TB{W[3]}"),
         ("Dữ liệu đến", as_of, None),
     ])
 
@@ -229,11 +258,12 @@ def page_vol():
         st.markdown(
             "- **Ý nghĩa:** tìm cổ phiếu có lượng khớp lệnh đang co hẹp dần (thường gặp khi tích luỹ/đi ngang). "
             "Đây là công cụ sàng lọc, **không phải tín hiệu mua/bán**.\n"
-            "- **Điều kiện:** KLGD trung bình 5 < 10 < 20 < 40 (phiên với khung Ngày, tuần với khung Tuần; "
+            f"- **Điều kiện:** KLGD trung bình {W[0]} < {W[1]} < {W[2]} < {W[3]} (phiên với khung Ngày, tuần với khung Tuần; "
             "KLGD tuần = tổng các phiên trong tuần kết thúc thứ Sáu).\n"
-            "- **Số mốc đạt:** 4/4 = đạt đủ (mặc định hiển thị); 3/4 = mới đạt TB5<TB10<TB20, chưa < TB40.\n"
-            "- **% TB5 so với TB40:** càng đỏ đậm thì khối lượng càng cạn.\n"
+            f"- **Số mốc đạt:** 4/4 = đạt đủ (mặc định hiển thị); 3/4 = mới đạt TB{W[0]}<TB{W[1]}<TB{W[2]}, chưa < TB{W[3]}.\n"
+            f"- **{engine.PCT_COL}:** càng đỏ đậm thì khối lượng càng cạn.\n"
             "- **GTGD TB20 (tỷ):** giá trị giao dịch TB 20 phiên, chỉ để tham khảo thanh khoản — không dùng để lọc.\n"
+            "- **Mã rời danh sách:** xem bảng ở cuối trang (chọn khoảng thời gian tuỳ ý).\n"
             "- Phiên/tuần đang diễn ra không được tính."
         )
 
@@ -242,26 +272,51 @@ def page_vol():
     data = week_df if is_week else day_df
     last = last_w if is_week else last_d
     unit = "tuần" if is_week else "phiên"
-    with st.container(border=True, key="card_vol_table"):
-        if last:
-            st.markdown(f'<div class="asof">Tính đến {unit} kết thúc ngày {last} (không tính {unit} đang diễn ra).</div>',
-                        unsafe_allow_html=True)
-        if data.empty:
-            st.info("Không có mã nào thỏa điều kiện.")
+    def _vol_table(data):
+        with st.container(border=True, key="card_vol_table"):
+            if last:
+                st.markdown(f'<div class="asof">Tính đến {unit} kết thúc ngày {last} (không tính {unit} đang diễn ra).</div>',
+                            unsafe_allow_html=True)
+            if data.empty:
+                st.info("Không có mã nào thỏa điều kiện.")
+                return
+            if not show_near:
+                data = data[data["Số mốc đạt"] >= 4]
+            data = _match(data, q, "Ngành")
+            data = data.sort_values(engine.PCT_COL).reset_index(drop=True)
+            st.caption(f"{len(data)} mã")
+            if data.empty:
+                st.info("Không có mã nào khớp bộ lọc.")
+                return
+            cols = ["Mã", "Ngành", "RS", *engine.TB_COLS, engine.PCT_COL, "Số mốc đạt", "GTGD TB20 (tỷ)"]
+            data = data[[c for c in cols if c in data.columns]]
+            table_with_select(data, f"vol_tbl_{'w' if is_week else 'd'}_{int(show_near)}",
+                              display=ui.style_volume(data),
+                              column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
+
+    _vol_table(data)
+
+    # ---- Mã RỜI danh sách trong khoảng thời gian tự chỉnh ----
+    with st.container(border=True, key="card_vol_exits"):
+        st.subheader("📤 Mã rời danh sách")
+        st.caption(f"Mã từng đủ 4 mốc ({TB_RULE} < TB{W[3]}) ở {unit} liền trước nhưng {unit} sau thì không còn đủ.")
+        end_d = datetime.strptime(last, "%d/%m/%Y").date() if last else datetime.now(engine.VN_TZ).date()
+        back = 90 if is_week else 30
+        rng = st.date_input("Khoảng thời gian", value=(end_d - timedelta(days=back), end_d),
+                            min_value=stocks["date"].min().date(), max_value=end_d, format="DD/MM/YYYY",
+                            key=f"vol_exit_rng_{'w' if is_week else 'd'}")
+        if not (isinstance(rng, (tuple, list)) and len(rng) == 2):
+            st.info("Chọn đủ ngày bắt đầu và ngày kết thúc.")
             return
-        if not show_near:
-            data = data[data["Số mốc đạt"] >= 4]
-        data = _match(data, q, "Ngành")
-        data = data.sort_values("% TB5 so với TB40").reset_index(drop=True)
-        st.caption(f"{len(data)} mã")
-        if data.empty:
-            st.info("Không có mã nào khớp bộ lọc.")
+        ex = cached_exits(str(data_path), MTIME, str(rng[0]), str(rng[1]), is_week, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+        ex = _match(ex, q, "Ngành") if len(ex) else ex
+        if ex.empty:
+            st.info("Không có mã nào rời danh sách trong khoảng này.")
             return
-        cols = ["Mã", "Ngành", "RS", "TB5", "TB10", "TB20", "TB40", "% TB5 so với TB40", "Số mốc đạt", "GTGD TB20 (tỷ)"]
-        data = data[[c for c in cols if c in data.columns]]
-        table_with_select(data, f"vol_tbl_{'w' if is_week else 'd'}_{int(show_near)}",
-                          display=ui.style_volume(data),
-                          column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
+        st.caption(f"{len(ex)} lượt rời · {ex['Mã'].nunique()} mã")
+        pct = engine.PCT_COL + " (khi rời)"
+        st.dataframe(ex.style.apply(ui._zebra, axis=None).format({pct: "{:.1f}%"}, na_rep="–"), width="stretch",
+                     hide_index=True, **tbl_dims(len(ex)), column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
 
 
 # ---------------------------------------------------------------------------
