@@ -467,3 +467,29 @@ def set_watchlist(username: str, items: list[dict]) -> None:
         data = _read_local(WATCH_FILE)
         data[key] = items
         _write_local(WATCH_FILE, data)
+
+
+# ---------------------------------------------------------------- Tuỳ chọn riêng từng người dùng (vd: trang báo theo dõi)
+REDIS_PREF_KEY = "rs:prefs"              # hash: field = "<username>:<tên tuỳ chọn>", value = JSON
+PREF_FILE = DATA_DIR / "prefs.json"
+
+
+def get_pref(username: str, name: str, default=None):
+    key = f"{username.strip().lower()}:{name}"
+    if redis_enabled():
+        raw = _redis("HGET", REDIS_PREF_KEY, key)
+        try:
+            return json.loads(raw) if raw else default
+        except ValueError:
+            return default
+    return _read_local(PREF_FILE).get(key, default)
+
+
+def set_pref(username: str, name: str, value) -> None:
+    key = f"{username.strip().lower()}:{name}"
+    if redis_enabled():
+        _redis("HSET", REDIS_PREF_KEY, key, json.dumps(value, ensure_ascii=False))
+    else:
+        data = _read_local(PREF_FILE)
+        data[key] = value
+        _write_local(PREF_FILE, data)
