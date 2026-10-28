@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from src import engine, ui
+from src import auth, engine, ui
 
 ROOT = Path(__file__).resolve().parent.parent  # thư mục rs_app/
 GREEN, RED, BLUE, AMBER = "#16a34a", "#dc2626", "#7B61FF", "#f59e0b"
@@ -113,7 +113,7 @@ def _clip_years(df: pd.DataFrame, label: str) -> pd.DataFrame:
 NEWS_PAGE = 30
 
 
-def render_news(news):
+def render_news(news, username: str | None = None):
     st.header("📰 Tin tức tổng hợp")
     if not news or not news.get("articles"):
         _missing("news_data.json", "Cập nhật tin tức (update_news)")
@@ -121,10 +121,27 @@ def render_news(news):
     articles = sorted(news["articles"], key=lambda a: a.get("published_at") or "", reverse=True)
     cats = news.get("categories") or sorted({a.get("category") for a in articles if a.get("category")})
 
-    st.caption(f"Nguồn: CafeF · Vietstock · Investing.com (RSS công khai) · Cập nhật lần cuối: "
+    counts = {}
+    for a in articles:
+        counts[a.get("source") or "Khác"] = counts.get(a.get("source") or "Khác", 0) + 1
+    sources = sorted(counts, key=lambda k: (-counts[k], k))
+    st.caption(f"Nguồn: {len(sources)} trang báo (RSS công khai) · Cập nhật lần cuối: "
                f"{news.get('updated_at', '–')} · {len(articles)} bài gần nhất")
     st.caption("Tag mã (VD `VIC`) được gắn tự động khi tiêu đề/tóm tắt có nhắc mã viết HOA — "
                "chỉ là gợi ý theo từ khoá, có thể sót hoặc nhầm.")
+
+    # Bộ lọc trang báo: nhớ lựa chọn đã lưu của người dùng (nếu có), mặc định chọn tất cả
+    if "news_src" not in st.session_state:
+        saved = auth.get_pref(username, "news_sources", None) if username else None
+        st.session_state["news_src"] = [x for x in (saved or []) if x in sources] or sources
+    else:
+        st.session_state["news_src"] = [x for x in st.session_state["news_src"] if x in sources]
+    s1, s2 = st.columns([5, 1], vertical_alignment="bottom")
+    picked = s1.multiselect("Trang báo theo dõi", sources, key="news_src",
+                            format_func=lambda k: f"{k} ({counts[k]})", placeholder="Chọn trang báo...")
+    if username and s2.button("💾 Lưu", width="stretch", help="Lưu các trang báo đang chọn làm mặc định của bạn"):
+        auth.set_pref(username, "news_sources", picked)
+        st.toast("Đã lưu các trang báo theo dõi")
 
     c1, c2 = st.columns([3, 2], vertical_alignment="bottom")
     cat = c1.pills("Chuyên mục", ["Tất cả"] + list(cats), default="Tất cả", key="news_cat") or "Tất cả"
@@ -132,6 +149,8 @@ def render_news(news):
                       label_visibility="collapsed").strip().lower()
 
     def hit(a):
+        if (a.get("source") or "Khác") not in picked:
+            return False
         if cat != "Tất cả" and a.get("category") != cat:
             return False
         if not q:
@@ -140,7 +159,7 @@ def render_news(news):
         return q in hay
 
     rows = [a for a in articles if hit(a)]
-    sig = (cat, q)
+    sig = (cat, q, tuple(picked))
     if st.session_state.get("news_sig") != sig:  # đổi bộ lọc -> quay về trang đầu
         st.session_state["news_sig"], st.session_state["news_n"] = sig, NEWS_PAGE
     n = st.session_state.setdefault("news_n", NEWS_PAGE)
