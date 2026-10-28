@@ -304,7 +304,7 @@ def page_vol():
 # Các trang còn lại (logic nằm trong src/pages_extra.py)
 # ---------------------------------------------------------------------------
 def page_news():
-    pages_extra.render_news(pages_extra.load_json("news_data.json"))
+    pages_extra.render_news(pages_extra.load_json("news_data.json"), user["username"])
 
 
 def page_flow():
