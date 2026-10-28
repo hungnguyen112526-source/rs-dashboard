@@ -10,7 +10,11 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import auth, engine, night, pages_extra, ui, watch  # noqa: E402
+from src import auth, engine, night, pages_extra, ui  # noqa: E402
+try:
+    from src import watch  # noqa: E402
+except ImportError:      # thiếu rs_app/src/watch.py thì chỉ trang Theo dõi báo lỗi, không sập cả app
+    watch = None
 
 ASSETS = next((d for d in (ROOT / "assets", ROOT.parent / "assets") if d.is_dir()), ROOT / "assets")
 _FAVICON, _LOGO = ASSETS / "favicon-192.png", ASSETS / "logo.png"
@@ -114,7 +118,8 @@ def open_chart(frame_df: pd.DataFrame, ticker: str, key: str):
     def _dlg():
         if info:
             st.caption(" · ".join(info))
-        watch.toggle(ticker, user["username"], key)
+        if watch:
+            watch.toggle(ticker, user["username"], key)
         show_chart(ticker, key)
 
     _dlg()
@@ -321,11 +326,13 @@ def page_calendar():
 
 
 def page_watch():
+    if watch is None:
+        st.error("Thiếu file `rs_app/src/watch.py` trên GitHub. Hãy up file này vào thư mục `rs_app/src/` rồi Reboot app.")
+        return
     now = datetime.now(engine.VN_TZ)
     day_df, _, _, _ = cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}")
     scores, _ = cached_rs(str(data_path), MTIME, "day")
-    rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
-    watch.render(stocks, user["username"], rs_map, day_df)
+    watch.render(stocks, user["username"], scores, day_df, pages_extra.load_json("financials_data.json"))
 
 
 def page_admin():
