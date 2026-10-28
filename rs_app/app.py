@@ -1,4 +1,4 @@
-="""Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
+"""Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
