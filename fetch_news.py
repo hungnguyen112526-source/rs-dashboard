@@ -23,6 +23,8 @@ import re
 import json
 from datetime import datetime, timezone, timedelta
 
+import socket
+
 import feedparser
 import pandas as pd
 
@@ -32,7 +34,12 @@ OUTPUT_FILE = "news_data.json"
 VN_TZ = timezone(timedelta(hours=7))
 
 MAX_ARTICLES_PER_FEED = 40   # chỉ giữ N bài mới nhất mỗi feed (feed RSS thường tự giới hạn sẵn)
-MAX_TOTAL_ARTICLES = 500     # giới hạn tổng số bài giữ lại trong news_data.json
+MAX_PER_SOURCE = 120         # tối đa N bài mới nhất mỗi trang báo, để nguồn đăng nhiều không lấn át nguồn khác
+MAX_TOTAL_ARTICLES = 2000    # giới hạn tổng số bài giữ lại trong news_data.json
+
+# Một số báo chặn user-agent mặc định của feedparser; feed treo quá 20 giây thì bỏ qua
+feedparser.USER_AGENT = "Mozilla/5.0 (compatible; ChungKhoanSungRung/1.0; +RSS reader)"
+socket.setdefaulttimeout(20)
 
 RSS_SOURCES = [
     # --- CafeF ---
@@ -54,6 +61,23 @@ RSS_SOURCES = [
     # investingLive = ForexLive cũ (đổi tên 21/07/2025). Feed chính thức: https://investinglive.com/rss/
     {"url": "https://investinglive.com/feed/news/", "source": "investingLive", "category": "Thế giới / Quốc tế"},
     {"url": "https://investinglive.com/feed/centralbank/", "source": "investingLive", "category": "Thế giới / Quốc tế"},
+    # --- Báo tiếng Việt khác (địa chỉ RSS chưa kiểm tra tự động: nguồn nào lỗi/rỗng sẽ bị bỏ qua, xem log) ---
+    {"url": "https://vneconomy.vn/chung-khoan.rss", "source": "VnEconomy", "category": "Chứng khoán VN"},
+    {"url": "https://cafebiz.vn/rss/chung-khoan.rss", "source": "CafeBiz", "category": "Chứng khoán VN"},
+    {"url": "https://thanhnien.vn/rss/kinh-te/chung-khoan.rss", "source": "Thanh Niên", "category": "Chứng khoán VN"},
+    {"url": "https://tienphong.vn/rss/tai-chinh-chung-khoan-105.rss", "source": "Tiền Phong", "category": "Chứng khoán VN"},
+    {"url": "https://nld.com.vn/rss/kinh-te/tai-chinh-chung-khoan.rss", "source": "Người Lao Động", "category": "Chứng khoán VN"},
+    {"url": "https://nhandan.vn/rss/chungkhoan-1191.rss", "source": "Nhân Dân", "category": "Chứng khoán VN"},
+    {"url": "https://bnews.vn/rss/chung-khoan-33.rss", "source": "BNEWS", "category": "Chứng khoán VN"},
+    {"url": "https://www.sggp.org.vn/rss/kinhte-taichinhchuungkhoan-44.rss", "source": "SGGP", "category": "Chứng khoán VN"},
+    {"url": "https://antt.vn/rss/chung-khoan.rss", "source": "An ninh Thủ đô", "category": "Chứng khoán VN"},
+    {"url": "https://soha.vn/rss/kinh-doanh/chung-khoan.rss", "source": "Soha", "category": "Chứng khoán VN"},
+    {"url": "https://www.nguoiduatin.vn/rss/kinh-te/tai-chinh-ngan-hang.rss", "source": "Người Đưa Tin", "category": "Tài chính - Ngân hàng VN"},
+    {"url": "https://vnexpress.net/rss/kinh-doanh.rss", "source": "VnExpress", "category": "Doanh nghiệp VN"},
+    {"url": "https://vtv.vn/rss/kinh-te.rss", "source": "VTV", "category": "Vĩ mô VN"},
+    # --- Quốc tế ---
+    {"url": "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "source": "New York Times", "category": "Thế giới / Quốc tế"},
+    {"url": "https://www.theguardian.com/uk/business/rss", "source": "The Guardian", "category": "Thế giới / Quốc tế"},
 ]
 
 CATEGORY_ORDER = [
@@ -147,6 +171,17 @@ def fetch_feed(src, patterns):
     return articles
 
 
+def limit_articles(articles):
+    """Mới nhất lên đầu; mỗi trang báo tối đa MAX_PER_SOURCE bài, rồi cắt tổng số MAX_TOTAL_ARTICLES."""
+    articles = sorted(articles, key=lambda a: a["published_at"] or "0000-00-00 00:00", reverse=True)
+    per, out = {}, []
+    for a in articles:
+        per[a["source"]] = per.get(a["source"], 0) + 1
+        if per[a["source"]] <= MAX_PER_SOURCE:
+            out.append(a)
+    return out[:MAX_TOTAL_ARTICLES]
+
+
 def main():
     tickers = load_tickers()
     patterns = build_ticker_patterns(tickers)
@@ -177,8 +212,7 @@ def main():
         deduped.append(a)
 
     # Sắp mới nhất lên đầu (bài không xác định được thời gian xếp cuối), rồi cắt bớt tổng số
-    deduped.sort(key=lambda a: a["published_at"] or "0000-00-00 00:00", reverse=True)
-    deduped = deduped[:MAX_TOTAL_ARTICLES]
+    deduped = limit_articles(deduped)
 
     output = {
         "updated_at": datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M"),
