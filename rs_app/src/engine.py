@@ -149,9 +149,9 @@ def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None
             max(last_w).strftime("%d/%m/%Y") if last_w else None)
 
 
-def volume_exits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = False, now_vn: datetime | None = None):
-    """Các mã RỜI danh sách lọc (đủ 4 mốc) trong khoảng [start, end].
-    Một lượt rời = phiên/tuần t-1 còn đủ TB10<TB20<TB30<TB50 nhưng phiên/tuần t thì không. Bỏ phiên/tuần chưa kết thúc."""
+def volume_hits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = False, now_vn: datetime | None = None):
+    """Các mã TỪNG đủ điều kiện (TB10 < TB20 < TB30 < TB50) ở ít nhất một phiên/tuần trong khoảng [start, end].
+    Bỏ phiên/tuần chưa kết thúc. Trả về mỗi mã một dòng: lần đầu, lần cuối, số phiên/tuần đủ điều kiện, hiện trạng."""
     now_vn = now_vn or datetime.now(VN_TZ)
     today, session_open = now_vn.date(), now_vn.hour < 15
     start, end = pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize()
@@ -170,24 +170,23 @@ def volume_exits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = Fals
             continue
         ma = [v.rolling(w).mean() for w in VOL_WINDOWS]
         ok = (ma[0] < ma[1]) & (ma[1] < ma[2]) & (ma[2] < ma[3])
-        run = ok.groupby((ok != ok.shift()).cumsum()).cumsum()          # độ dài chuỗi liên tiếp trong danh sách
-        exits = ok.index[ok.shift(1, fill_value=False) & ~ok]
-        for d in exits:
-            if not (start <= d.normalize() <= end):
-                continue
-            i = ok.index.get_loc(d)
-            n = int(run.iloc[i - 1])
-            out.append({
-                "Mã": ticker, "Ngành": g["industry"].iloc[-1], "RS": rs_map.get(ticker),
-                "_d": d, "Ngày vào DS": ok.index[i - n].strftime("%d/%m/%Y"), "Ngày rời DS": d.strftime("%d/%m/%Y"),
-                f"Số {unit} trong DS": n,
-                PCT_COL + " (khi rời)": (ma[0].iloc[i] / ma[3].iloc[i] - 1) * 100,
-                "Hiện trạng": "Đang trong DS" if bool(ok.iloc[-1]) else "Đã ngoài DS",
-            })
+        day = ok.index.normalize()
+        hit = ok.index[ok.values & (day >= start) & (day <= end)]
+        if not len(hit):
+            continue
+        i = ok.index.get_loc(hit[-1])
+        out.append({
+            "Mã": ticker, "Ngành": g["industry"].iloc[-1], "RS": rs_map.get(ticker), "_d": hit[-1],
+            "Lần đầu đủ ĐK": hit[0].strftime("%d/%m/%Y"), "Lần cuối đủ ĐK": hit[-1].strftime("%d/%m/%Y"),
+            f"Số {unit} đủ ĐK": len(hit),
+            PCT_COL + " (lần cuối)": (ma[0].iloc[i] / ma[3].iloc[i] - 1) * 100,
+            "Hiện trạng": "Đang đủ ĐK" if bool(ok.iloc[-1]) else "Đã rời DS",
+        })
     res = pd.DataFrame(out)
     if res.empty:
         return res
-    return res.sort_values(["_d", "Mã"], ascending=[False, True]).drop(columns="_d").reset_index(drop=True)
+    cnt = f"Số {unit} đủ ĐK"
+    return res.sort_values(["_d", cnt], ascending=[False, False]).drop(columns="_d").reset_index(drop=True)
 
 
 # ----------------------------------------------------------------------------
