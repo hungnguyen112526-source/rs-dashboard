@@ -296,6 +296,22 @@ def _fin_fmt(v) -> str:
     return f"{v:,.2f}"
 
 
+def fin_tabs(data: dict, period_label: str, in_billions: bool = True) -> None:
+    """4 tab báo cáo (KQKD, CĐKT, LCTT, chỉ số) của một mã."""
+    tabs = st.tabs(list(FIN_LABELS.values()))
+    for tab, (key, label) in zip(tabs, FIN_LABELS.items()):
+        with tab:
+            frame, periods = _fin_frame(data.get(key), key, in_billions)
+            if frame is None:
+                st.info("Không có dữ liệu báo cáo này cho mã đã chọn.")
+                continue
+            styler = frame.style.apply(ui._zebra, axis=None).format(_fin_fmt, subset=periods, na_rep="–")
+            st.caption(f"{len(frame)} chỉ tiêu · {len(periods)} {period_label}")
+            st.dataframe(styler, hide_index=True, width="stretch", height=min(36 * (len(frame) + 1) + 3, 720),
+                         column_config={"Chỉ tiêu": st.column_config.TextColumn("Chỉ tiêu", pinned=True, width="large"),
+                                        "Đơn vị": st.column_config.TextColumn("Đơn vị", width="small")})
+
+
 def render_fin(fin, industry_map: dict):
     st.header("📑 Báo cáo tài chính")
     tickers = (fin or {}).get("tickers") or {}
@@ -312,19 +328,7 @@ def render_fin(fin, industry_map: dict):
                                        key="fin_unit") or "Tỷ đồng"
     in_billions = unit_choice == "Tỷ đồng"
 
-    data = tickers[ticker]
-    tabs = st.tabs(list(FIN_LABELS.values()))
-    for tab, (key, label) in zip(tabs, FIN_LABELS.items()):
-        with tab:
-            frame, periods = _fin_frame(data.get(key), key, in_billions)
-            if frame is None:
-                st.info("Không có dữ liệu báo cáo này cho mã đã chọn.")
-                continue
-            styler = frame.style.apply(ui._zebra, axis=None).format(_fin_fmt, subset=periods, na_rep="–")
-            st.caption(f"{len(frame)} chỉ tiêu · {len(periods)} {period_label}")
-            st.dataframe(styler, hide_index=True, width="stretch", height=min(36 * (len(frame) + 1) + 3, 720),
-                         column_config={"Chỉ tiêu": st.column_config.TextColumn("Chỉ tiêu", pinned=True, width="large"),
-                                        "Đơn vị": st.column_config.TextColumn("Đơn vị", width="small")})
+    fin_tabs(tickers[ticker], period_label, in_billions)
 
 
 # ----------------------------------------------------------------------------
