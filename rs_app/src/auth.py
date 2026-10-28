@@ -437,3 +437,33 @@ def delete_user(username: str) -> tuple[bool, str]:
         return False, err
     _delete_user(username)
     return True, f"Đã xoá '{username}'."
+
+
+# ---------------------------------------------------------------- Danh sách theo dõi (riêng từng người dùng)
+REDIS_WATCH_KEY = "rs:watch"             # hash: field = username (chữ thường), value = JSON danh sách
+WATCH_FILE = DATA_DIR / "watchlists.json"
+MAX_WATCH = 100
+
+
+def get_watchlist(username: str) -> list[dict]:
+    """[{"ticker": "MSR", "note": "...", "added": "2026-10-28"}, ...]"""
+    key = username.strip().lower()
+    if redis_enabled():
+        raw = _redis("HGET", REDIS_WATCH_KEY, key)
+        try:
+            return json.loads(raw) if raw else []
+        except ValueError:
+            return []
+    return _read_local(WATCH_FILE).get(key, [])
+
+
+def set_watchlist(username: str, items: list[dict]) -> None:
+    key = username.strip().lower()
+    items = [{"ticker": str(i["ticker"]).upper(), "note": str(i.get("note", ""))[:300], "added": i.get("added", "")}
+             for i in items][:MAX_WATCH]
+    if redis_enabled():
+        _redis("HSET", REDIS_WATCH_KEY, key, json.dumps(items, ensure_ascii=False))
+    else:
+        data = _read_local(WATCH_FILE)
+        data[key] = items
+        _write_local(WATCH_FILE, data)
