@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import auth, engine, night, pages_extra, ui  # noqa: E402
+from src import auth, engine, night, pages_extra, ui, watch  # noqa: E402
 
 ASSETS = next((d for d in (ROOT / "assets", ROOT.parent / "assets") if d.is_dir()), ROOT / "assets")
 _FAVICON, _LOGO = ASSETS / "favicon-192.png", ASSETS / "logo.png"
@@ -81,11 +81,11 @@ def cached_vol(path_str: str, mtime: float, hour_bucket: str):
 
 
 @st.cache_data(ttl=600)
-def cached_exits(path_str: str, mtime: float, start: str, end: str, weekly: bool, hour_bucket: str):
+def cached_hits(path_str: str, mtime: float, start: str, end: str, weekly: bool, hour_bucket: str):
     s, _ = load_all(path_str, mtime)
     scores, _ = cached_rs(path_str, mtime, "day")
     rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
-    return engine.volume_exits(s, rs_map, start, end, weekly)
+    return engine.volume_hits(s, rs_map, start, end, weekly)
 
 
 # ---- Biểu đồ trong cửa sổ nổi ----
@@ -114,6 +114,7 @@ def open_chart(frame_df: pd.DataFrame, ticker: str, key: str):
     def _dlg():
         if info:
             st.caption(" · ".join(info))
+        watch.toggle(ticker, user["username"], key)
         show_chart(ticker, key)
 
     _dlg()
@@ -263,60 +264,35 @@ def page_vol():
             f"- **Số mốc đạt:** 4/4 = đạt đủ (mặc định hiển thị); 3/4 = mới đạt TB{W[0]}<TB{W[1]}<TB{W[2]}, chưa < TB{W[3]}.\n"
             f"- **{engine.PCT_COL}:** càng đỏ đậm thì khối lượng càng cạn.\n"
             "- **GTGD TB20 (tỷ):** giá trị giao dịch TB 20 phiên, chỉ để tham khảo thanh khoản — không dùng để lọc.\n"
-            "- **Mã rời danh sách:** xem bảng ở cuối trang (chọn khoảng thời gian tuỳ ý).\n"
+            "- **Khoảng thời gian:** bảng liệt kê mọi mã từng đủ điều kiện ở ít nhất một phiên/tuần trong khoảng bạn chọn.\n"
             "- Phiên/tuần đang diễn ra không được tính."
         )
 
-    frame_ui, show_near, q = frame_filters(with_near=True, key="vol")
+    frame_ui, _, q = frame_filters(key="vol")
     is_week = frame_ui == "Tuần"
-    data = week_df if is_week else day_df
-    last = last_w if is_week else last_d
     unit = "tuần" if is_week else "phiên"
-    def _vol_table(data):
-        with st.container(border=True, key="card_vol_table"):
-            if last:
-                st.markdown(f'<div class="asof">Tính đến {unit} kết thúc ngày {last} (không tính {unit} đang diễn ra).</div>',
-                            unsafe_allow_html=True)
-            if data.empty:
-                st.info("Không có mã nào thỏa điều kiện.")
-                return
-            if not show_near:
-                data = data[data["Số mốc đạt"] >= 4]
-            data = _match(data, q, "Ngành")
-            data = data.sort_values(engine.PCT_COL).reset_index(drop=True)
-            st.caption(f"{len(data)} mã")
-            if data.empty:
-                st.info("Không có mã nào khớp bộ lọc.")
-                return
-            cols = ["Mã", "Ngành", "RS", *engine.TB_COLS, engine.PCT_COL, "Số mốc đạt", "GTGD TB20 (tỷ)"]
-            data = data[[c for c in cols if c in data.columns]]
-            table_with_select(data, f"vol_tbl_{'w' if is_week else 'd'}_{int(show_near)}",
-                              display=ui.style_volume(data),
-                              column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
-
-    _vol_table(data)
-
-    # ---- Mã RỜI danh sách trong khoảng thời gian tự chỉnh ----
-    with st.container(border=True, key="card_vol_exits"):
-        st.subheader("📤 Mã rời danh sách")
-        st.caption(f"Mã từng đủ 4 mốc ({TB_RULE} < TB{W[3]}) ở {unit} liền trước nhưng {unit} sau thì không còn đủ.")
+    last = last_w if is_week else last_d
+    with st.container(border=True, key="card_vol_table"):
         end_d = datetime.strptime(last, "%d/%m/%Y").date() if last else datetime.now(engine.VN_TZ).date()
         back = 90 if is_week else 30
+        st.caption(f"Chọn khoảng thời gian: trả về các mã **từng** đủ điều kiện ({TB_RULE} < TB{W[3]}) ở ít nhất một {unit} trong khoảng.")
         rng = st.date_input("Khoảng thời gian", value=(end_d - timedelta(days=back), end_d),
                             min_value=stocks["date"].min().date(), max_value=end_d, format="DD/MM/YYYY",
-                            key=f"vol_exit_rng_{'w' if is_week else 'd'}")
+                            key=f"vol_rng_{'w' if is_week else 'd'}")
         if not (isinstance(rng, (tuple, list)) and len(rng) == 2):
             st.info("Chọn đủ ngày bắt đầu và ngày kết thúc.")
             return
-        ex = cached_exits(str(data_path), MTIME, str(rng[0]), str(rng[1]), is_week, f"{now:%Y-%m-%d}-{now.hour >= 15}")
-        ex = _match(ex, q, "Ngành") if len(ex) else ex
-        if ex.empty:
-            st.info("Không có mã nào rời danh sách trong khoảng này.")
+        data = cached_hits(str(data_path), MTIME, str(rng[0]), str(rng[1]), is_week, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+        if len(data):
+            data = _match(data, q, "Ngành").reset_index(drop=True)
+        if data.empty:
+            st.info("Không có mã nào từng đủ điều kiện trong khoảng này.")
             return
-        st.caption(f"{len(ex)} lượt rời · {ex['Mã'].nunique()} mã")
-        pct = engine.PCT_COL + " (khi rời)"
-        st.dataframe(ex.style.apply(ui._zebra, axis=None).format({pct: "{:.1f}%"}, na_rep="–"), width="stretch",
-                     hide_index=True, **tbl_dims(len(ex)), column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
+        st.caption(f"{len(data)} mã")
+        pct = engine.PCT_COL + " (lần cuối)"
+        table_with_select(data, f"vol_tbl_{'w' if is_week else 'd'}",
+                          display=data.style.apply(ui._zebra, axis=None).format({pct: "{:.1f}%"}, na_rep="–"),
+                          column_config={"Mã": ui.CODE_COLUMN, "RS": ui.RS_COLUMN})
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +320,14 @@ def page_calendar():
     pages_extra.render_calendar(pages_extra.load_json("calendar_data.json"))
 
 
+def page_watch():
+    now = datetime.now(engine.VN_TZ)
+    day_df, _, _, _ = cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+    scores, _ = cached_rs(str(data_path), MTIME, "day")
+    rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
+    watch.render(stocks, user["username"], rs_map, day_df)
+
+
 def page_admin():
     ui.render_admin_page()
 
@@ -354,6 +338,7 @@ pages = [
     st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
     st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
     st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
+    st.Page(page_watch, title="Theo dõi", icon="⭐", url_path="theodoi"),
     st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
     st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
     st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
