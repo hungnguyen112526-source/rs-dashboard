@@ -100,15 +100,16 @@ AUTH_CSS = """
 
 
 @__import__("functools").lru_cache(maxsize=1)
-def _logo_b64() -> str:
-    """Logo nhúng thẳng vào HTML (base64) để không phụ thuộc đường dẫn tĩnh."""
+def _logo_html() -> str:
+    """Logo nhúng thẳng vào HTML (base64). Tìm ở rs_app/assets hoặc ../assets; thiếu ảnh thì dùng emoji, không để ảnh vỡ."""
     import base64
     from pathlib import Path
-    f = Path(__file__).resolve().parent.parent / "assets" / "logo-160.png"
-    try:
-        return base64.b64encode(f.read_bytes()).decode()
-    except OSError:
-        return ""
+    here = Path(__file__).resolve().parent.parent
+    for d in (here / "assets", here.parent / "assets"):
+        f = d / "logo-160.png"
+        if f.is_file():
+            return f'<img src="data:image/png;base64,{base64.b64encode(f.read_bytes()).decode()}" alt="">'
+    return '<div style="font-size:2.4rem;line-height:76px;text-align:center">📈</div>'
 
 
 def render_auth_portal():
@@ -116,7 +117,7 @@ def render_auth_portal():
     st.markdown(AUTH_CSS, unsafe_allow_html=True)
     with st.container(border=True, key="card_auth"):
         st.markdown(
-            f'<div class="auth-head"><div class="auth-logo"><img src="data:image/png;base64,{_logo_b64()}" alt=""></div>'
+            f'<div class="auth-head"><div class="auth-logo">{_logo_html()}</div>'
             '<div class="auth-title">CHỨNG KHOÁN SUNG RỤNG</div>'
             '<div class="auth-sub">Xếp hạng sức mạnh giá · Lọc khối lượng · Cổ phiếu Việt Nam</div></div>',
             unsafe_allow_html=True,
@@ -249,11 +250,13 @@ def style_volume(df: pd.DataFrame):
     """Bảng lọc KLGD: nền đỏ nhạt theo % giảm, nhãn mốc xanh/vàng, dòng xen kẽ."""
     d = df.copy()
     d["Số mốc đạt"] = d["Số mốc đạt"].astype(int).map(lambda n: f"{n}/4")
-    fmt = {c: "{:,.0f}" for c in ["TB5", "TB10", "TB20", "TB40"] if c in d}
-    fmt["% TB5 so với TB40"] = "{:.1f}%"
+    from src import engine
+    pct = engine.PCT_COL
+    fmt = {c: "{:,.0f}" for c in engine.TB_COLS if c in d}
+    fmt[pct] = "{:.1f}%"
     fmt["GTGD TB20 (tỷ)"] = "{:,.1f}"
     st_ = d.style.apply(_zebra, axis=None).format(fmt, na_rep="–")
-    st_ = _cellmap(st_, _bg_drop, ["% TB5 so với TB40"])
+    st_ = _cellmap(st_, _bg_drop, [pct])
     st_ = _cellmap(st_, _bg_tiers, ["Số mốc đạt"])
     return st_
 
