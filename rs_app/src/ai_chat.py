@@ -13,6 +13,7 @@ Secrets tuỳ chọn (xem .streamlit/secrets.toml.example):
 from __future__ import annotations
 
 import itertools
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterator, Optional
@@ -184,7 +185,11 @@ def _explain(e: Exception) -> AIError:
         return AIError("Hạn mức miễn phí của Gemini đang hết. Hãy đợi vài phút rồi hỏi lại, hoặc nhập API key riêng ở nút ⚙️.")
     if code in (500, 503, 504):
         return AIError("Dịch vụ Gemini đang quá tải, vui lòng thử lại sau ít phút.")
-    return AIError(f"Không gọi được Gemini ({type(e).__name__}). Vui lòng thử lại.")
+    if code == 404:
+        return AIError("Các model trong GEMINI_MODELS không còn khả dụng với key này. Hãy cập nhật GEMINI_MODELS "
+                       "(xem danh sách model trong Google AI Studio).")
+    detail = str(getattr(e, "message", "") or "")[:160]
+    return AIError(f"Không gọi được Gemini ({type(e).__name__} {code or ''}: {detail}). Vui lòng thử lại.")
 
 
 def _history_contents(types, history: list[dict]):
@@ -194,6 +199,31 @@ def _history_contents(types, history: list[dict]):
         if text:
             out.append(types.Content(role="user" if m["role"] == "user" else "model", parts=[types.Part(text=text)]))
     return out
+
+
+_DISCOVERED: tuple[float, list[str]] = (0.0, [])
+
+
+def _discover_models(client) -> list[str]:
+    """Hỏi Google danh sách model hiện có và chọn tối đa 3 model 'flash' (bản thường trước bản lite, mới nhất trước) (cache 1 giờ).
+    Dùng khi tên trong GEMINI_MODELS đều báo 404 (model đã bị gỡ/đổi tên)."""
+    global _DISCOVERED
+    if time.time() - _DISCOVERED[0] < 3600 and _DISCOVERED[1]:
+        return list(_DISCOVERED[1])
+    found = []
+    try:
+        for m in client.models.list():
+            n = str(getattr(m, "name", "")).removeprefix("models/")
+            acts = getattr(m, "supported_actions", None) or []
+            if ("generateContent" in acts and "flash" in n
+                    and not re.search(r"image|tts|live|audio|native|robotics|computer|embed|thinking|-exp", n)):
+                v = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
+                found.append(("lite" in n, "preview" in n, -(float(v.group(1)) if v else 0.0), n))
+    except Exception:  # noqa: BLE001
+        return []
+    names = [x[-1] for x in sorted(found)][:3]
+    _DISCOVERED = (time.time(), names)
+    return names
 
 
 def stream_answer(tools: AITools, history: list[dict], question: str, page: str, api_key: str, own_key: bool,
@@ -210,6 +240,7 @@ def stream_answer(tools: AITools, history: list[dict], question: str, page: str,
     system = SYSTEM_PROMPT + (f"\n\nNGỮ CẢNH: hôm nay {now:%d/%m/%Y %H:%M} (giờ Việt Nam). Người dùng đang xem trang "
                               f"\"{page}\". Dữ liệu giá của web đến ngày {tools.d.as_of or 'không rõ'}.")
     models = _models()
+    discovered = [False]
     contents = _history_contents(types, history) + [types.Content(role="user", parts=[types.Part(text=question)])]
     fns = tools.tool_functions()
 
@@ -238,6 +269,13 @@ def stream_answer(tools: AITools, history: list[dict], question: str, page: str,
                     start[0] = idx + 1
                     continue
                 raise _explain(e) from e
+        if last is not None and getattr(last, "code", None) == 404 and not discovered[0]:
+            discovered[0] = True       # mọi model cấu hình đều 404 -> tự dò model đang có rồi thử lại 1 lần
+            found = _discover_models(client)
+            if found:
+                models[:] = found
+                start[0] = 0
+                return open_stream(final)
         raise _explain(last) if last else AIError("Không có model nào khả dụng (kiểm tra GEMINI_MODELS).")
 
     for round_no in range(MAX_TOOL_ROUNDS + 1):
