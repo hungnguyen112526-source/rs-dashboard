@@ -6,6 +6,10 @@ SRC = "app/static/temple_night.html"   # cần [server] enableStaticServing = tr
 CSS = """<style>
 .stApp,[data-testid="stAppViewContainer"],[data-testid="stHeader"],[data-testid="stSidebar"]{background:transparent!important}
 [data-testid="stAppViewContainer"],[data-testid="stSidebar"]{position:relative;z-index:1}
+/* Khi bật nền, thanh bên bị giãn theo chiều cao nội dung nên không cuộn được -> công tắc "tắt nền" nằm ngoài tầm với.
+   Ép thanh bên cao đúng bằng cửa sổ và cho phần nội dung tự cuộn. */
+[data-testid="stSidebar"]{height:100vh!important;max-height:100vh!important}
+[data-testid="stSidebarContent"]{height:100%!important;max-height:100vh!important;overflow-y:auto!important}
 [data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stDialog"] > div{
  background:rgba(8,12,16,.68)!important;backdrop-filter:blur(14px);border-radius:16px}
 .stApp,.stApp p,.stApp label,.stApp h1,.stApp h2,.stApp h3{color:#e9eef0}
