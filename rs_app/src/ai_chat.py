@@ -66,14 +66,15 @@ SUGGESTIONS = ["Tóm tắt thị trường phiên gần nhất", "Ngành nào đ
 CSS = """
 <style>
 /* Khung chat AI nổi. Màu nền đặt đục (không trong suốt) để đọc rõ trên mọi trang và cả nền Temple Night. */
-[class*="st-key-ai_fab"] { position: fixed; right: 20px; bottom: 20px; z-index: 1000; width: auto !important; }
+/* bottom: chừa chỗ cho nhãn "Manage app"/huy hiệu của Streamlit Cloud ở góc dưới phải */
+[class*="st-key-ai_fab"] { position: fixed; right: 20px; bottom: 84px; z-index: 1000; width: auto !important; }
 [class*="st-key-ai_fab"] button { border-radius: 999px !important; padding: .55rem 1.1rem; font-weight: 800;
    background: linear-gradient(135deg,#6A57F2,#8b6cff) !important; color: #fff !important; border: 0 !important;
    box-shadow: 0 14px 30px -10px rgba(106,87,242,.75); }
-[class*="st-key-ai_panel_"] { position: fixed; right: 20px; bottom: 20px; z-index: 1000; max-width: calc(100vw - 24px);
+[class*="st-key-ai_panel_"] { position: fixed; right: 20px; bottom: 84px; z-index: 1000; max-width: calc(100vw - 24px);
    border-radius: 22px; padding: .7rem .8rem .5rem; background: var(--ai-bg, #fff) !important;
    border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-   box-shadow: 0 30px 70px -20px rgba(20,15,50,.55); max-height: calc(100vh - 80px); overflow-y: auto; }
+   box-shadow: 0 30px 70px -20px rgba(20,15,50,.55); max-height: calc(100vh - 150px); overflow-y: auto; }
 .st-key-ai_panel_s { width: 340px; } .st-key-ai_panel_m { width: 420px; } .st-key-ai_panel_l { width: 560px; }
 [class*="st-key-ai_panel_"] [data-testid="stChatInput"] { border-radius: 999px; }
 [class*="st-key-ai_panel_"] h4 { margin: 0 !important; font-size: 1rem; letter-spacing: -.02em; }
@@ -85,8 +86,8 @@ CSS = """
   [data-testid="stMain"] [class*="st-key-ai_panel_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
   [data-testid="stMain"] [class*="st-key-ai_panel_"] [data-testid="stColumn"] { min-width: 0 !important; flex: 0 0 auto !important; width: auto !important; }
   [data-testid="stMain"] [class*="st-key-ai_panel_"] [data-testid="stColumn"]:first-child { flex: 1 1 auto !important; }
-  [class*="st-key-ai_panel_"] { left: 8px; right: 8px; bottom: 8px; width: auto !important; max-width: none; }
-  [class*="st-key-ai_fab"] { right: 12px; bottom: 12px; }
+  [class*="st-key-ai_panel_"] { left: 8px; right: 8px; bottom: 76px; width: auto !important; max-width: none; }
+  [class*="st-key-ai_fab"] { right: 12px; bottom: 76px; }
 }
 @media print { [class*="st-key-ai_"] { display: none !important; } }
 </style>
