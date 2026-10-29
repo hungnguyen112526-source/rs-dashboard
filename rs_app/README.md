@@ -34,3 +34,14 @@ streamlit run app.py
 ## Lưu ý quan trọng về quyền riêng tư dữ liệu
 Đăng nhập chỉ chặn việc vào ứng dụng. Nếu repo GitHub để **public**, ai cũng đọc được `gia_lich_su_rs.csv`.
 Muốn dữ liệu thật sự riêng tư phải để repo **private** — nhưng GitHub Pages (bản dự phòng) cần gói trả phí cho repo private.
+
+## Trợ lý AI (khung chat nổi, Gemini miễn phí)
+Sau khi đăng nhập, góc dưới bên phải có nút **💬 Hỏi AI**. Bấm để mở khung chat, bấm **✕** để thu gọn (↔️ đổi cỡ, 🗑️ xoá cuộc trò chuyện, ⚙️ nhập API key riêng).
+- AI chỉ trả lời dựa trên dữ liệu có trong web: giá/KLGD, RS cổ phiếu & ngành, bộ lọc KLGD giảm dần, BCTC, tin tức, vĩ mô, trái phiếu, lịch kinh tế
+  (các công cụ chỉ đọc nằm trong `src/ai_tools.py`). Không có công cụ ghi và không truy cập internet.
+- Cấu hình: thêm `GEMINI_API_KEY` (và tuỳ chọn `GEMINI_MODELS`, `AI_USER_PER_HOUR`, `AI_USER_PER_DAY`, `AI_GLOBAL_RPM`, `AI_GLOBAL_RPD`)
+  vào Secrets — xem `.streamlit/secrets.toml.example`. Không có key chung thì mỗi người tự nhập key riêng ở ⚙️ (key chỉ lưu trong phiên, không ghi vào máy chủ).
+- Gói miễn phí có hạn mức thấp và tính theo **project** (không theo key): mỗi câu hỏi tốn 2-4 request, nên app giới hạn lượt theo người dùng/hệ thống
+  và tự chuyển sang model dự phòng khi gặp lỗi 429. Hãy đối chiếu tên model và hạn mức thực tế trong Google AI Studio.
+- Lưu ý quyền riêng tư: với gói miễn phí, câu hỏi gửi tới Google có thể được xử lý theo điều khoản của gói đó — đừng nhập thông tin nhạy cảm.
+- Lịch sử chat lưu theo người dùng (tối đa 20 tin gần nhất) trong cùng nơi lưu tuỳ chọn người dùng (Redis hoặc file cục bộ).

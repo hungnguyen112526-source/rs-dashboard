@@ -12,6 +12,10 @@ if str(ROOT) not in sys.path:
 
 from src import auth, engine, night, pages_extra, ui  # noqa: E402
 try:
+    from src import ai_chat, ai_tools  # noqa: E402
+except ImportError:      # thiếu file AI thì app vẫn chạy bình thường, chỉ không có khung chat
+    ai_chat = ai_tools = None
+try:
     from src import watch  # noqa: E402
 except ImportError:      # thiếu rs_app/src/watch.py thì chỉ trang Theo dõi báo lỗi, không sập cả app
     watch = None
@@ -352,4 +356,23 @@ pages = [
 ]
 if is_admin:
     pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
-st.navigation(pages, position="sidebar").run()
+current_page = st.navigation(pages, position="sidebar")
+current_page.run()
+
+
+# ---- Khung chat AI nổi (bật/tắt bằng nút 💬 góc dưới phải) ----
+def _ai_volume():
+    now = datetime.now(engine.VN_TZ)
+    return cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+
+
+if ai_chat is not None:
+    ai_chat.render(
+        ai_tools.AIData(
+            stocks=stocks, vnindex=vnindex,
+            scores_fn=lambda frame: cached_rs(str(data_path), MTIME, frame)[0],
+            industry_fn=lambda frame: cached_rs(str(data_path), MTIME, frame)[1],
+            volume_fn=_ai_volume,
+            json_fn=pages_extra.load_json,
+            as_of=as_of),
+        username=user["username"], page=getattr(current_page, "title", "") or "")
