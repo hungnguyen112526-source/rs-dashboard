@@ -27,22 +27,83 @@ h1 { line-height: 1.15 !important; }
 [data-testid="stMetricValue"] { font-weight: 900; letter-spacing: -.03em; }
 [data-testid="stMetricLabel"] p { opacity: .7; font-size: .85rem; font-weight: 700; }
 
-/* Nút & lựa chọn dạng viên thuốc */
-[data-testid^="stBaseButton-"] { border-radius: 999px !important; font-weight: 800; letter-spacing: -.01em; }
-[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {
-  box-shadow: 0 8px 18px -8px var(--primary-color, #6A57F2);
+/* ===== Hệ nút: 3 mức cùng chiều cao / bo góc / viền khi bàn phím =====
+   chính  = nền tím, chữ trắng   (primary)
+   phụ    = viền mảnh            (secondary)
+   nhẹ    = không viền, hiện nền khi rê chuột (tertiary) */
+[data-testid^="stBaseButton-"] {
+  border-radius: 999px !important; font-weight: 700; letter-spacing: -.01em; min-height: 40px; padding: .25rem 1.1rem;
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
-[data-testid="stButtonGroup"] button { border-radius: 999px !important; font-weight: 700; }
+[data-testid^="stBaseButton-"]:active { transform: scale(.98); }
+[data-testid^="stBaseButton-"]:focus-visible { outline: 2px solid rgba(123,97,255,.9) !important; outline-offset: 2px; }
+[data-testid^="stBaseButton-"]:disabled { opacity: .45; cursor: not-allowed; box-shadow: none !important; }
+
+[data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"] {
+  background: transparent; border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+[data-testid="stBaseButton-secondary"]:hover:not(:disabled), [data-testid="stBaseButton-secondaryFormSubmit"]:hover:not(:disabled) {
+  background: rgba(123,97,255,.10); border-color: rgba(123,97,255,.55); color: inherit;
+}
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {
+  background: linear-gradient(135deg, #6A57F2, #8b6cff) !important; color: #fff !important; border: 0 !important;
+  box-shadow: 0 10px 22px -10px rgba(106,87,242,.85);
+}
+[data-testid="stBaseButton-primary"]:hover:not(:disabled), [data-testid="stBaseButton-primaryFormSubmit"]:hover:not(:disabled) {
+  filter: brightness(1.08); transform: translateY(-1px);
+}
+[data-testid="stBaseButton-tertiary"] { background: transparent; border: 0; min-height: 36px; padding: .2rem .6rem; }
+[data-testid="stBaseButton-tertiary"]:hover:not(:disabled) { background: color-mix(in srgb, currentColor 9%, transparent); color: inherit; }
+
+/* Nút chọn (st.segmented_control: Ngày|Tuần, Gọn|Vừa|Lớn...): một thanh liền, ô đang chọn tô tím đặc */
+[data-testid="stButtonGroup"] [role="radiogroup"], [data-testid="stButtonGroup"] [role="group"] {
+  display: inline-flex; flex-wrap: nowrap; gap: 2px !important; padding: 3px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 7%, transparent); border: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+[data-testid="stButtonGroup"] button[data-variant="segmented_control"] {
+  border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 999px !important;
+  min-height: 32px !important; padding: 0 .95rem !important; font-weight: 700; color: inherit !important;
+}
+[data-testid="stButtonGroup"] button[data-variant="segmented_control"]:hover:not([data-selected="true"]) {
+  background: color-mix(in srgb, currentColor 10%, transparent) !important;
+}
+[data-testid="stButtonGroup"] button[data-variant="segmented_control"][data-selected="true"],
+[data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] {
+  background: linear-gradient(135deg, #6A57F2, #8b6cff) !important; color: #fff !important;
+  box-shadow: 0 6px 14px -6px rgba(106,87,242,.9) !important;
+}
+[data-testid="stButtonGroup"] button[data-variant="segmented_control"] p { color: inherit !important; }
 [data-testid="stTextInput"] [data-baseweb="input"] { border-radius: 999px; }
 [data-testid="stSelectbox"] [data-baseweb="select"] > div,
 [data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-radius: 16px; }
 [data-testid="stDataFrame"] { border-radius: 16px; overflow: hidden; }
 [data-testid="stExpander"] details { border-radius: 18px; }
 
-/* Thanh bên: menu trang dạng viên thuốc, trang đang mở được tô nhẹ */
+/* ===== Thanh bên =====
+   mục danh sách giữ nguyên; thêm: khoảng thoáng, rê chuột, thanh nhấn tím cho trang đang mở */
 [data-testid="stSidebar"] { border-right: 1px solid color-mix(in srgb, currentColor 9%, transparent); }
-[data-testid="stSidebarNavLink"] { border-radius: 999px; font-weight: 700; }
+[data-testid="stSidebarNavItems"] { gap: 2px; }
+[data-testid="stSidebarNavLink"] {
+  position: relative; border-radius: 14px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
+  transition: background-color .15s ease, transform .15s ease;
+}
+[data-testid="stSidebarNavLink"]:hover:not([aria-current="page"]) { background: color-mix(in srgb, currentColor 7%, transparent); transform: translateX(2px); }
 [data-testid="stSidebarNavLink"][aria-current="page"] { background: rgba(123,97,255,.16); font-weight: 800; }
+[data-testid="stSidebarNavLink"][aria-current="page"]::before {
+  content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, #6A57F2, #2fa8ff);
+}
+/* Thẻ người dùng + chân thanh bên (key="side_user", "side_foot" ở app.py) */
+.st-key-side_user { border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 18px; padding: .7rem .75rem .6rem;
+  background: color-mix(in srgb, currentColor 4%, transparent); }
+.side-id { display: flex; align-items: center; gap: .65rem; margin-bottom: .55rem; }
+.side-av { flex: 0 0 auto; width: 2.35rem; height: 2.35rem; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 900;
+  background: linear-gradient(135deg, #6A57F2, #2fa8ff); }
+.side-name { font-weight: 800; letter-spacing: -.02em; line-height: 1.2; overflow-wrap: anywhere; }
+.side-role { display: inline-block; margin-top: .15rem; padding: .05rem .5rem; border-radius: 999px; font-size: .72rem; font-weight: 800;
+  background: rgba(123,97,255,.15); }
+.st-key-side_foot { margin-top: .4rem; }
+.st-key-side_foot [data-testid="stCaptionContainer"] { opacity: .6; font-size: .78rem; }
 
 .auth-card { background: color-mix(in srgb, currentColor 4%, transparent); border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
              border-radius: 24px; padding: 1.4rem 1.2rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 30px 60px -38px rgba(40,30,80,.38); }
@@ -74,6 +135,8 @@ h1 { line-height: 1.15 !important; }
   /* hàng thẻ số: 2 thẻ / hàng */
   [data-testid="stMain"] [data-testid="stHorizontalBlock"]:has([class*="st-key-card_kpi"]) > [data-testid="stColumn"] {
       min-width: calc(50% - .5rem) !important; flex: 1 1 calc(50% - .5rem) !important; }
+  [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-primary"] { min-height: 44px; }
+  [data-testid="stSidebarNavLink"] { padding: .5rem .8rem; min-height: 44px; }
   [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
   [data-testid="stMetricLabel"] p { font-size: .78rem; }
   [class*="st-key-card"] { border-radius: 18px; }
