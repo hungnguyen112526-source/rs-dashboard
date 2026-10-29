@@ -1,4 +1,5 @@
 """Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
+import html
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -64,13 +65,16 @@ as_of = f"{stocks['date'].max():%d/%m/%Y}"
 
 # ---- Sidebar: chỉ còn người dùng + Thoát + mốc dữ liệu ----
 with st.sidebar:
-    c1, c2 = st.columns([3, 2])
-    c1.markdown(f"👤 **{user.get('fullname', user['username'])}**")
-    c1.caption("👑 Quản trị" if is_admin else "⭐ Thành viên")
-    if c2.button("🚪 Thoát", width="stretch"):
-        auth.logout()
-    st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
-    night.render(night.toggle())
+    _disp = str(user.get("fullname") or user["username"])
+    with st.container(key="side_user"):
+        st.html(f'<div class="side-id"><div class="side-av">{html.escape(_disp[:1].upper())}</div>'
+                f'<div><div class="side-name">{html.escape(_disp)}</div>'
+                f'<span class="side-role">{"Quản trị" if is_admin else "Thành viên"}</span></div></div>')
+        if st.button("Thoát", icon=":material/logout:", width="stretch", key="logout_btn"):
+            auth.logout()
+    with st.container(key="side_foot"):
+        night.render(night.toggle())
+        st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
 
 
 @st.cache_data(ttl=600)
