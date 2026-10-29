@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import auth, engine, night, pages_extra, ui  # noqa: E402
+from src import auth, engine, home, night, pages_extra, ui  # noqa: E402
 try:
     from src import ai_chat, ai_tools  # noqa: E402
 except ImportError:      # thiếu file AI thì app vẫn chạy bình thường, chỉ không có khung chat
@@ -343,9 +343,15 @@ def page_admin():
     ui.render_admin_page()
 
 
+def page_home():
+    scores, ind = cached_rs(str(data_path), MTIME, "day")
+    home.render(user, as_of, vnindex, scores, ind, stocks["ticker"].nunique(), PAGE_BY_PATH)
+
+
 # ---- Điều hướng ở thanh bên trái ----
 pages = [
-    st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs", default=True),
+    st.Page(page_home, title="Trang chủ", icon="🏠", url_path="trangchu", default=True),
+    st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs"),
     st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
     st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
     st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
@@ -356,6 +362,7 @@ pages = [
 ]
 if is_admin:
     pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
+PAGE_BY_PATH = {p.url_path: p for p in pages}
 current_page = st.navigation(pages, position="sidebar")
 current_page.run()
 
