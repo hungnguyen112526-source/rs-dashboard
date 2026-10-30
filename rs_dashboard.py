@@ -182,7 +182,7 @@ def raw_score_to_rs(raw_scores: pd.Series) -> pd.Series:
     # rank 1 = cao nhất -> dùng ascending=False
     rank = raw_scores.rank(method="min", ascending=False)
     rs = ((n - rank) / n) * 99 + 1
-    return rs.round(0).astype(int)
+    return rs.round(0).clip(1, 99).astype(int)   # kẹp 1-99: mã đứng đầu làm tròn 99,5 -> 100
 
 
 def compute_industry_rs(stock_table: pd.DataFrame) -> pd.DataFrame:

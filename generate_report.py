@@ -93,7 +93,7 @@ def raw_score_to_rs(raw_scores):
     n = len(raw_scores)
     rank = raw_scores.rank(method="min", ascending=False)
     rs = ((n - rank) / n) * 99 + 1
-    return rs.round(0).astype(int)
+    return rs.round(0).clip(1, 99).astype(int)   # kẹp 1-99: mã đứng đầu làm tròn 99,5 -> 100
 
 
 def build_chart_data(df: pd.DataFrame):
@@ -1628,7 +1628,7 @@ def main():
       <li>Chia dữ liệu giá thành <b>4 khối</b>, mỗi khối <b>{block_size} {unit}</b> liên tiếp, không chồng lấn (Khối 1 = {block_size} {unit} gần nhất, ... Khối 4 = {block_size} {unit} xa nhất).</li>
       <li>Tính <b>% thay đổi giá</b> của từng khối: %Δ = (Giá cuối khối − Giá đầu khối) / Giá đầu khối.</li>
       <li>Tính <b>Điểm thô</b> mỗi mã = 0.4×%Δ(Khối 1) + 0.3×%Δ(Khối 2) + 0.2×%Δ(Khối 3) + 0.1×%Δ(Khối 4) — khối gần nhất có trọng số cao nhất.</li>
-      <li>Xếp hạng tất cả mã theo Điểm thô (cao → thấp), quy đổi <b>RS cổ phiếu</b> (thang 1–99) = ((N − hạng) / N) × 99 + 1, với N = tổng số mã.</li>
+      <li>Xếp hạng tất cả mã theo Điểm thô (cao → thấp), quy đổi <b>RS cổ phiếu</b> (thang 1–99) = ((N − hạng) / N) × 99 + 1 (làm tròn, kẹp trong 1–99), với N = tổng số mã.</li>
       <li><b>Điểm thô Ngành</b> = trung bình cộng Điểm thô của các mã trong ngành.</li>
       <li>Áp dụng lại bước 4 cho các ngành để ra <b>RS Ngành</b> (thang 1–99), với M = tổng số ngành.</li>
     </ol>

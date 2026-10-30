@@ -38,6 +38,11 @@ VOL_RATIO_RANGE = (0.9, 1.1)   # trung vị KL mới / KL cũ phải nằm trong
 SESSION_OFFSET = pd.Timedelta(hours=7)   # CSV cũ lưu ngày dạng "YYYY-MM-DD 07:00:00"
 
 
+# Ghi chú của Result khi TradingView có phản hồi nhưng dữ liệu mã đó bị loại (không phải sự cố của TradingView)
+REJECTED_PREFIXES = ("chưa có lịch sử", "dữ liệu TradingView không khớp", "dữ liệu TradingView cũ hơn",
+                     "dữ liệu TradingView không hợp lệ")
+
+
 class SourceError(Exception):
     """Nguồn không dùng được (thiếu khoá, thư viện, mạng...)."""
 
@@ -305,9 +310,10 @@ class PriceFetcher:
                     self._record(ticker, res)
                     return res
                 notes.append("TV: " + res.note)
-                if res.note.startswith("chưa có lịch sử"):
-                    pass                       # không phải lỗi của TradingView -> không tính vào ngắt mạch
-                else:
+                # TradingView vẫn phản hồi bình thường, chỉ là dữ liệu của RIÊNG mã này bị loại (chưa có lịch sử để đối chiếu,
+                # không khớp, cũ hơn...) -> chuyển riêng mã đó sang vnstock, KHÔNG tính vào ngắt mạch (nếu không, vài mã
+                # lệch khối lượng liên tiếp sẽ tắt TradingView cho cả những mã dữ liệu tốt).
+                if not res.note.startswith(REJECTED_PREFIXES):
                     self._tv_failed()
             except Exception as e:  # noqa: BLE001
                 notes.append(f"TV lỗi: {type(e).__name__}")
