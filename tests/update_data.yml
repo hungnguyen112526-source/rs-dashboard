@@ -1,0 +1,109 @@
+name: Cập nhật dữ liệu RS hàng ngày
+
+on:
+  schedule:
+    # 7:00 sáng giờ VN (UTC+7) = 00:00 UTC -> chạy T2-T6
+    - cron: "0 0 * * 1-5"
+    # 12:00 trưa giờ VN (UTC+7) = 05:00 UTC -> chạy T2-T6
+    - cron: "0 5 * * 1-5"
+    # 15:30 chiều giờ VN (UTC+7) = 08:30 UTC -> chạy T2-T6
+    - cron: "30 8 * * 1-5"
+    # Chủ nhật 08:00 giờ VN: lấy lại TOÀN BỘ lịch sử (TradingView tối đa 5000 nến, mã lỗi/không khớp -> vnstock)
+    # để tự chữa các lần điều chỉnh giá cổ tức/chia tách
+    - cron: "0 1 * * 0"
+  workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
+    inputs:
+      full_refresh:
+        description: "Lấy lại toàn bộ lịch sử (TradingView tối đa 5000 nến; chọn price_source=vnstock để dùng vnstock)"
+        type: boolean
+        default: false
+      price_source:
+        description: "Nguồn giá: auto (TradingView rồi vnstock) | tv | vnstock"
+        type: choice
+        options: [auto, tv, vnstock]
+        default: auto
+
+# tránh 2 lần chạy cùng ghi vào CSV/docs cùng lúc
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Chạy script lấy dữ liệu giá cổ phiếu (TradingView trước, vnstock dự phòng)
+        env:
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
+          TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+          PRICE_SOURCE: ${{ inputs.price_source || 'auto' }}
+          FULL_REFRESH: ${{ (github.event.schedule == '0 1 * * 0' || inputs.full_refresh == true) && '1' || '' }}
+        run: python fetch_data.py
+
+      - name: Chạy script lấy dữ liệu vĩ mô
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: python fetch_macro.py
+        continue-on-error: true  # vĩ mô là phần phụ trợ; nếu FRED/World Bank/vnstock bị lỗi
+                                  # tạm thời thì vẫn không chặn việc cập nhật bảng xếp hạng RS
+
+      - name: Lấy lãi suất trái phiếu 30 năm toàn cầu (TradingView)
+        run: python fetch_bond_yields.py
+        continue-on-error: true  # phần phụ trợ; tvdatafeed là thư viện không chính thức,
+                                  # lỗi tạm thời không nên chặn cập nhật bảng xếp hạng RS
+
+      - name: Sinh báo cáo HTML tĩnh
+        run: python generate_report.py
+        # Lưu ý: BCTC (financials_data.json) KHÔNG được fetch lại ở workflow này nữa —
+        # xem update_financials.yml (chạy riêng, 1 lần/ngày, vì BCTC là dữ liệu theo quý,
+        # không cần lấy lại 3 lần/ngày như giá cổ phiếu). generate_report.py ở đây vẫn đọc
+        # financials_data.json đã có sẵn trong repo (nếu có) để giữ nguyên trang BCTC.
+
+      - name: Commit và push file dữ liệu + báo cáo mới
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gia_lich_su_rs.csv macro_data.json docs/
+          for f in bond_yields.json price_source_log.json tv_exchange_map.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
+
+          # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
+          # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại
+          # vài lần thay vì để cả workflow fail ngay lần đầu. Có rebase lại trước mỗi lần
+          # thử để phòng trường hợp có commit khác đã push lên trong lúc này.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1
