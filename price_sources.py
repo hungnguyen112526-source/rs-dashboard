@@ -344,7 +344,8 @@ class PriceFetcher:
         if self.tv_fail_streak >= self.breaker and not self.tv_disabled:
             self.tv_disabled = True
             self.tv_disabled_reason = f"ngắt mạch sau {self.breaker} lần lỗi liên tiếp"
-            print(f"   >> TradingView lỗi {self.breaker} lần liên tiếp - chuyển toàn bộ phần còn lại sang vnstock.")
+            rest = "chuyển toàn bộ phần còn lại sang vnstock" if self.mode == "auto" else "bỏ qua phần còn lại (PRICE_SOURCE=tv, không có vnstock dự phòng)"
+            print(f"   >> TradingView lỗi {self.breaker} lần liên tiếp - {rest}.")
 
     def _record(self, ticker: str, res: Result):
         if res.exchange:
