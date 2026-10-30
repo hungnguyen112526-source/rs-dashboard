@@ -8,12 +8,13 @@ on:
     - cron: "0 5 * * 1-5"
     # 15:30 chiều giờ VN (UTC+7) = 08:30 UTC -> chạy T2-T6
     - cron: "30 8 * * 1-5"
-    # Chủ nhật 08:00 giờ VN: lấy lại TOÀN BỘ lịch sử từ vnstock (tự chữa các lần điều chỉnh giá cổ tức/chia tách)
+    # Chủ nhật 08:00 giờ VN: lấy lại TOÀN BỘ lịch sử (TradingView tối đa 5000 nến, mã lỗi/không khớp -> vnstock)
+    # để tự chữa các lần điều chỉnh giá cổ tức/chia tách
     - cron: "0 1 * * 0"
   workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
     inputs:
       full_refresh:
-        description: "Lấy lại toàn bộ lịch sử từ vnstock (bỏ qua TradingView)"
+        description: "Lấy lại toàn bộ lịch sử (TradingView tối đa 5000 nến; chọn price_source=vnstock để dùng vnstock)"
         type: boolean
         default: false
       price_source:
