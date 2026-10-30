@@ -8,7 +8,24 @@ on:
     - cron: "0 5 * * 1-5"
     # 15:30 chiều giờ VN (UTC+7) = 08:30 UTC -> chạy T2-T6
     - cron: "30 8 * * 1-5"
-  workflow_dispatch: {}  # cho phép bấm chạy tay từ tab Actions trên GitHub
+    # Chủ nhật 08:00 giờ VN: lấy lại TOÀN BỘ lịch sử từ vnstock (tự chữa các lần điều chỉnh giá cổ tức/chia tách)
+    - cron: "0 1 * * 0"
+  workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
+    inputs:
+      full_refresh:
+        description: "Lấy lại toàn bộ lịch sử từ vnstock (bỏ qua TradingView)"
+        type: boolean
+        default: false
+      price_source:
+        description: "Nguồn giá: auto (TradingView rồi vnstock) | tv | vnstock"
+        type: choice
+        options: [auto, tv, vnstock]
+        default: auto
+
+# tránh 2 lần chạy cùng ghi vào CSV/docs cùng lúc
+concurrency:
+  group: data-update
+  cancel-in-progress: false
 
 jobs:
   update-data:
@@ -27,9 +44,13 @@ jobs:
       - name: Cài thư viện
         run: pip install -r requirements.txt
 
-      - name: Chạy script lấy dữ liệu giá cổ phiếu
+      - name: Chạy script lấy dữ liệu giá cổ phiếu (TradingView trước, vnstock dự phòng)
         env:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
+          TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+          PRICE_SOURCE: ${{ inputs.price_source || 'auto' }}
+          FULL_REFRESH: ${{ (github.event.schedule == '0 1 * * 0' || inputs.full_refresh == true) && '1' || '' }}
         run: python fetch_data.py
 
       - name: Chạy script lấy dữ liệu vĩ mô
@@ -57,7 +78,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add gia_lich_su_rs.csv macro_data.json docs/
-          if [ -f bond_yields.json ]; then git add bond_yields.json; fi
+          for f in bond_yields.json price_source_log.json tv_exchange_map.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
 
           if git diff --cached --quiet; then
             echo "Không có gì thay đổi, bỏ qua commit/push."
