@@ -1,4 +1,4 @@
-name: Cập nhật dữ liệu RS (vnstock - 6 lần/ngày)
+name: Cập nhật dữ liệu RS (vnstock - 6 lần/ngày + full 5h sáng)
 
 # Workflow này lấy giá bằng VNSTOCK. Giá bằng TradingView nằm ở workflow riêng: update_data_tv.yml
 # (Chủ nhật + thứ Hai). Cả hai ghi chung gia_lich_su_rs.csv nên dùng chung nhóm concurrency bên dưới.
@@ -19,6 +19,8 @@ on:
     - cron: "10 8 * * 1-5"
     # 16:30 VN = 09:30 UTC
     - cron: "30 9 * * 1-5"
+    # 05:00 VN = 22:00 UTC (hôm trước), CẢ TUẦN: lấy lại TOÀN BỘ lịch sử từ vnstock (FULL_REFRESH) để tự chữa các lần điều chỉnh giá
+    - cron: "0 22 * * *"
   workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
     inputs:
       full_refresh:
@@ -52,7 +54,7 @@ jobs:
         env:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           PRICE_SOURCE: vnstock
-          FULL_REFRESH: ${{ inputs.full_refresh == true && '1' || '' }}
+          FULL_REFRESH: ${{ (github.event.schedule == '0 22 * * *' || inputs.full_refresh == true) && '1' || '' }}
         run: python fetch_data.py
 
       - name: Chạy script lấy dữ liệu vĩ mô
