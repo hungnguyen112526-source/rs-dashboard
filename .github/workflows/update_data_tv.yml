@@ -1,0 +1,86 @@
+name: Cập nhật dữ liệu RS (TradingView - Chủ nhật + thứ Hai)
+
+# Workflow này lấy giá bằng TRADINGVIEW (tvdatafeed). Giá bằng vnstock nằm ở update_data.yml (6 lần/ngày T2-T6).
+# Cả hai ghi chung gia_lich_su_rs.csv nên dùng chung nhóm concurrency (chạy lần lượt, không chồng nhau).
+# Chế độ PRICE_SOURCE=tv: mã nào TradingView lỗi/không khớp thì GIỮ dữ liệu cũ (không chuyển sang vnstock);
+# mã mới chưa có lịch sử cũng do workflow vnstock thêm vào.
+
+on:
+  schedule:
+    # Chủ nhật 08:00 giờ VN = 01:00 UTC: lấy lại TOÀN BỘ lịch sử (tối đa 5000 nến) để tự chữa các lần điều chỉnh giá
+    - cron: "0 1 * * 0"
+    # Thứ Hai 16:00 giờ VN = 09:00 UTC: cập nhật phần đuôi sau phiên
+    - cron: "0 9 * * 1"
+  workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
+    inputs:
+      full_refresh:
+        description: "Lấy lại toàn bộ lịch sử từ TradingView (tối đa 5000 nến)"
+        type: boolean
+        default: false
+
+# tránh 2 lần chạy cùng ghi vào CSV/docs cùng lúc (dùng chung nhóm với update_data.yml)
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  update-data-tv:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Chạy script lấy dữ liệu giá cổ phiếu (TradingView)
+        env:
+          TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
+          TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+          PRICE_SOURCE: tv
+          FULL_REFRESH: ${{ (github.event.schedule == '0 1 * * 0' || inputs.full_refresh == true) && '1' || '' }}
+        run: python fetch_data.py
+
+      - name: Sinh báo cáo HTML tĩnh
+        run: python generate_report.py
+
+      - name: Commit và push file dữ liệu + báo cáo mới
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gia_lich_su_rs.csv docs/
+          for f in price_source_log.json tv_exchange_map.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật giá RS (TradingView) tự động $(date +'%Y-%m-%d')"
+
+          # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
+          # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại
+          # vài lần thay vì để cả workflow fail ngay lần đầu. Có rebase lại trước mỗi lần
+          # thử để phòng trường hợp có commit khác đã push lên trong lúc này.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1

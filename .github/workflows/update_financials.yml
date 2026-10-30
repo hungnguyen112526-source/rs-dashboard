@@ -1,13 +1,13 @@
 name: Cập nhật báo cáo tài chính (BCTC)
 
-# Tách riêng khỏi update_data.yml (chạy 3 lần/ngày) vì BCTC là dữ liệu theo QUÝ — không
+# Tách riêng khỏi update_data.yml (chạy 6 lần/ngày) vì BCTC là dữ liệu theo QUÝ — không
 # thay đổi trong ngày — nên không cần lấy lại nhiều lần/ngày như giá cổ phiếu. Chạy workflow
 # này 1 lần/ngày là đủ, giúp giảm đáng kể tổng thời gian chạy Actions mỗi ngày.
 
 on:
   schedule:
-    # 8:00 sáng giờ VN (UTC+7) = 01:00 UTC -> chạy T2-T6. Chạy sau update_data.yml (lịch
-    # 7:00 giờ VN = 00:00 UTC) khoảng 1 tiếng để tránh 2 workflow cùng commit/push 1 lúc.
+    # 8:00 sáng giờ VN (UTC+7) = 01:00 UTC -> chạy T2-T6. Chạy trước lần chạy giá đầu
+    # tiên trong ngày (09:30 giờ VN) để tránh 2 workflow cùng commit/push 1 lúc.
     - cron: "0 1 * * 1-5"
   workflow_dispatch: {}  # cho phép bấm chạy tay từ tab Actions trên GitHub
 

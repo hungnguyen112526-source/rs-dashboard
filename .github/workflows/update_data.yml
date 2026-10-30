@@ -1,27 +1,30 @@
-name: Cập nhật dữ liệu RS hàng ngày
+name: Cập nhật dữ liệu RS (vnstock - 6 lần/ngày)
+
+# Workflow này lấy giá bằng VNSTOCK. Giá bằng TradingView nằm ở workflow riêng: update_data_tv.yml
+# (Chủ nhật + thứ Hai). Cả hai ghi chung gia_lich_su_rs.csv nên dùng chung nhóm concurrency bên dưới.
+# Tên file giữ nguyên update_data.yml vì nút "Cập nhật ngay" trong báo cáo (generate_report.py) trỏ vào file này.
 
 on:
   schedule:
-    # 7:00 sáng giờ VN (UTC+7) = 00:00 UTC -> chạy T2-T6
-    - cron: "0 0 * * 1-5"
-    # 12:00 trưa giờ VN (UTC+7) = 05:00 UTC -> chạy T2-T6
-    - cron: "0 5 * * 1-5"
-    # 15:30 chiều giờ VN (UTC+7) = 08:30 UTC -> chạy T2-T6
-    - cron: "30 8 * * 1-5"
-    # Chủ nhật 08:00 giờ VN: lấy lại TOÀN BỘ lịch sử (TradingView tối đa 5000 nến, mã lỗi/không khớp -> vnstock)
-    # để tự chữa các lần điều chỉnh giá cổ tức/chia tách
-    - cron: "0 1 * * 0"
+    # T2-T6, giờ VN (UTC+7) -> UTC. Lần giữa phiên chỉ có nến chưa chốt, sẽ được ghi đè ở lần chạy sau.
+    # 09:30 VN = 02:30 UTC
+    - cron: "30 2 * * 1-5"
+    # 11:35 VN = 04:35 UTC
+    - cron: "35 4 * * 1-5"
+    # 13:30 VN = 06:30 UTC
+    - cron: "30 6 * * 1-5"
+    # 14:35 VN = 07:35 UTC
+    - cron: "35 7 * * 1-5"
+    # 15:10 VN = 08:10 UTC
+    - cron: "10 8 * * 1-5"
+    # 16:30 VN = 09:30 UTC
+    - cron: "30 9 * * 1-5"
   workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
     inputs:
       full_refresh:
-        description: "Lấy lại toàn bộ lịch sử (TradingView tối đa 5000 nến; chọn price_source=vnstock để dùng vnstock)"
+        description: "Lấy lại toàn bộ lịch sử từ vnstock (chậm: ~5 giây/mã)"
         type: boolean
         default: false
-      price_source:
-        description: "Nguồn giá: auto (TradingView rồi vnstock) | tv | vnstock"
-        type: choice
-        options: [auto, tv, vnstock]
-        default: auto
 
 # tránh 2 lần chạy cùng ghi vào CSV/docs cùng lúc
 concurrency:
@@ -29,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  update-data:
+  update-data-vnstock:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -45,13 +48,11 @@ jobs:
       - name: Cài thư viện
         run: pip install -r requirements.txt
 
-      - name: Chạy script lấy dữ liệu giá cổ phiếu (TradingView trước, vnstock dự phòng)
+      - name: Chạy script lấy dữ liệu giá cổ phiếu (vnstock)
         env:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
-          TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
-          TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
-          PRICE_SOURCE: ${{ inputs.price_source || 'auto' }}
-          FULL_REFRESH: ${{ (github.event.schedule == '0 1 * * 0' || inputs.full_refresh == true) && '1' || '' }}
+          PRICE_SOURCE: vnstock
+          FULL_REFRESH: ${{ inputs.full_refresh == true && '1' || '' }}
         run: python fetch_data.py
 
       - name: Chạy script lấy dữ liệu vĩ mô
@@ -62,7 +63,7 @@ jobs:
         continue-on-error: true  # vĩ mô là phần phụ trợ; nếu FRED/World Bank/vnstock bị lỗi
                                   # tạm thời thì vẫn không chặn việc cập nhật bảng xếp hạng RS
 
-      - name: Lấy lãi suất trái phiếu 30 năm toàn cầu (TradingView)
+      - name: Lấy lãi suất trái phiếu 30 năm toàn cầu (TradingView - phần phụ trợ, vẫn chạy ở workflow này)
         run: python fetch_bond_yields.py
         continue-on-error: true  # phần phụ trợ; tvdatafeed là thư viện không chính thức,
                                   # lỗi tạm thời không nên chặn cập nhật bảng xếp hạng RS
