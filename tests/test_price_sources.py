@@ -39,10 +39,11 @@ def tv_from(old, scale=1.0, shift_hours=0, vol_mult=1.0, drop_last=0):
 
 class FakeTV:
     def __init__(self, data=None, fail=False):
-        self.data, self.fail, self.calls = data or {}, fail, []
+        self.data, self.fail, self.calls, self.bars = data or {}, fail, [], []
 
     def get_hist(self, symbol, exchange, interval, n_bars):
         self.calls.append((symbol, exchange))
+        self.bars.append(n_bars)
         if self.fail:
             raise RuntimeError("tv down")
         return self.data.get((symbol, exchange))
@@ -182,10 +183,38 @@ def test_tv_mode_has_no_fallback():
     assert res.df is None and not vn.calls
 
 
-def test_full_refresh_goes_to_vnstock_from_history_start():
+def test_full_refresh_uses_tradingview_with_max_bars_and_writes_whole_history():
     old = make_old()
     tv, vn = FakeTV({("AAA", "HOSE"): tv_from(old)}), FakeVN()
+    f = fetcher(tv, vn, {"AAA": old}, full_refresh=True, history_start="2015-01-01")
+    assert not f.tv_disabled
+    res = f.fetch("AAA")
+    assert res.source == "tv" and not vn.calls
+    assert tv.bars == [price_sources.FULL_REFRESH_BARS]               # xin tối đa số nến
+    assert len(res.df) == len(old)                                      # ghi toàn bộ, không chỉ phần đuôi 5 ngày
+    assert (res.df["date"].dt.normalize().values == old.index.values).all()
+
+
+def test_normal_run_still_writes_only_the_tail():
+    old = make_old()
+    tv = FakeTV({("AAA", "HOSE"): tv_from(old)})
+    res = fetcher(tv, FakeVN(), {"AAA": old}, tv_bars=150).fetch("AAA")
+    assert tv.bars == [150] and 0 < len(res.df) < len(old)
+
+
+def test_full_refresh_mismatch_falls_back_to_vnstock_from_history_start():
+    old = make_old()
+    bad = tv_from(old)
+    bad["close"] = bad["close"] * 1.2                                   # TradingView không khớp -> không được ghi đè lịch sử
+    tv, vn = FakeTV({("AAA", "HOSE"): bad}), FakeVN()
     res = fetcher(tv, vn, {"AAA": old}, full_refresh=True, history_start="2015-01-01").fetch("AAA")
+    assert res.source == "vnstock" and vn.starts == ["2015-01-01"] and "không khớp" in res.note
+
+
+def test_full_refresh_with_vnstock_mode_goes_to_vnstock_from_history_start():
+    old = make_old()
+    tv, vn = FakeTV({("AAA", "HOSE"): tv_from(old)}), FakeVN()
+    res = fetcher(tv, vn, {"AAA": old}, mode="vnstock", full_refresh=True, history_start="2015-01-01").fetch("AAA")
     assert res.source == "vnstock" and vn.starts == ["2015-01-01"] and not tv.calls
 
 
