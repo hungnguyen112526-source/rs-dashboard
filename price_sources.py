@@ -32,6 +32,8 @@ INDEX_SYMBOLS = {"VNINDEX": "HOSE", "VN30": "HOSE", "HNXINDEX": "HNX"}
 PRICE_TOL = 0.005        # giá lệch tối đa 0,5% được coi là "khớp"
 MIN_MATCH = 0.90         # tỷ lệ phiên chồng lấn phải khớp
 MIN_OVERLAP = 10         # số phiên chồng lấn tối thiểu để đối chiếu
+RECENT_WINDOW = 20       # chỉ đối chiếu giá/khối lượng ở ngần này phiên chồng lấn gần nhất (điều chỉnh giá cũ không làm hỏng việc nhận dữ liệu)
+MERGE_BACK_DAYS = 5      # chỉ ghi các nến từ (ngày cuối trong CSV - 5 ngày) trở đi; lịch sử cũ giữ nguyên, không bị TradingView ghi đè
 VOL_RATIO_RANGE = (0.9, 1.1)   # trung vị KL mới / KL cũ phải nằm trong khoảng này
 SESSION_OFFSET = pd.Timedelta(hours=7)   # CSV cũ lưu ngày dạng "YYYY-MM-DD 07:00:00"
 
@@ -91,43 +93,58 @@ def tv_raw_to_frame(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
 class Calibration:
     shift_days: int
     scale: float
-    match: float
+    match: float                 # tỷ lệ khớp giá ở RECENT_WINDOW phiên gần nhất (dùng để quyết định nhận/loại)
     overlap: int
     vol_ratio: Optional[float]
+    match_all: float = 0.0       # tỷ lệ khớp trên toàn bộ phần chồng lấn (chỉ để tham khảo/chẩn đoán)
+
+
+def _compare(new: pd.DataFrame, old: pd.DataFrame, shift: int, scale: float) -> Optional[dict]:
+    old_close = old["close"].astype(float)
+    days = pd.DatetimeIndex((new["date"].dt.normalize() + pd.Timedelta(days=shift)).values)
+    s = pd.Series((new["close"].astype(float) * scale).values, index=days)
+    s = s[~s.index.duplicated(keep="last")]
+    common = s.index.intersection(old_close.index).sort_values()
+    if len(common) < MIN_OVERLAP:
+        return None
+    a, b = s.loc[common], old_close.loc[common]
+    rel = (a - b).abs() / b.abs().clip(lower=1e-9)
+    vr = None
+    if "volume" in new.columns and "volume" in old.columns:
+        nv = pd.Series(new["volume"].astype(float).values, index=days)
+        nv = nv[~nv.index.duplicated(keep="last")].reindex(common)
+        ov = old["volume"].astype(float).reindex(common)
+        m = ((ov > 0) & (nv > 0)).iloc[-RECENT_WINDOW:]
+        if m.sum() >= 5:
+            vr = float((nv.iloc[-RECENT_WINDOW:][m] / ov.iloc[-RECENT_WINDOW:][m]).median())
+    return {"shift": shift, "scale": scale, "a": a, "b": b, "rel": rel, "overlap": int(len(common)), "vol_ratio": vr,
+            "match": float((rel.iloc[-RECENT_WINDOW:] <= PRICE_TOL).mean()), "match_all": float((rel <= PRICE_TOL).mean())}
+
+
+def diagnose(new: pd.DataFrame, old: pd.DataFrame, is_index: bool = False):
+    """Tìm (độ lệch ngày, hệ số đơn vị) khớp nhất rồi quyết định nhận/loại.
+    Trả về (Calibration hoặc None, thông tin chẩn đoán gồm 'best' và 'reason')."""
+    if old is None or old.empty:
+        return None, {"best": None, "reason": "chưa có lịch sử để đối chiếu"}
+    best = None
+    for shift in (0, 1, -1):
+        for scale in ((1.0,) if is_index else (1.0, 0.001)):
+            c = _compare(new, old, shift, scale)
+            if c and (best is None or (c["match"], c["match_all"]) > (best["match"], best["match_all"])):
+                best = c
+    if best is None:
+        return None, {"best": None, "reason": f"không đủ phiên chồng lấn (< {MIN_OVERLAP})"}
+    reason = ""
+    if best["match"] < MIN_MATCH:
+        reason = f"giá {RECENT_WINDOW} phiên gần nhất chỉ khớp {best['match']:.0%} (toàn bộ {best['match_all']:.0%})"
+    elif best["vol_ratio"] is not None and not (VOL_RATIO_RANGE[0] <= best["vol_ratio"] <= VOL_RATIO_RANGE[1]):
+        reason = f"khối lượng lệch thang (TV/CSV = {best['vol_ratio']:.2f})"
+    cal = None if reason else Calibration(best["shift"], best["scale"], best["match"], best["overlap"], best["vol_ratio"], best["match_all"])
+    return cal, {"best": best, "reason": reason}
 
 
 def calibrate(new: pd.DataFrame, old: pd.DataFrame, is_index: bool = False) -> Optional[Calibration]:
-    """Tìm (độ lệch ngày, hệ số đơn vị) làm dữ liệu mới khớp dữ liệu cũ nhất; None nếu không khớp đủ tốt."""
-    if old is None or old.empty:
-        return None
-    old_close = old["close"].astype(float)
-    best: Optional[Calibration] = None
-    for shift in (0, 1, -1):
-        days = (new["date"].dt.normalize() + pd.Timedelta(days=shift)).values
-        for scale in ((1.0,) if is_index else (1.0, 0.001)):
-            s = pd.Series((new["close"].astype(float) * scale).values, index=pd.DatetimeIndex(days))
-            s = s[~s.index.duplicated(keep="last")]
-            common = s.index.intersection(old_close.index)
-            if len(common) < MIN_OVERLAP:
-                continue
-            a, b = s.loc[common], old_close.loc[common]
-            rel = (a - b).abs() / b.abs().clip(lower=1e-9)
-            match = float((rel <= PRICE_TOL).mean())
-            if best is None or match > best.match:
-                vr = None
-                if "volume" in new.columns and "volume" in old.columns:
-                    nv = pd.Series(new["volume"].astype(float).values, index=pd.DatetimeIndex(days))
-                    nv = nv[~nv.index.duplicated(keep="last")].reindex(common)
-                    ov = old["volume"].astype(float).reindex(common)
-                    m = (ov > 0) & (nv > 0)
-                    if m.sum() >= 5:
-                        vr = float((nv[m] / ov[m]).median())
-                best = Calibration(shift, scale, match, int(len(common)), vr)
-    if best is None or best.match < MIN_MATCH:
-        return None
-    if best.vol_ratio is not None and not (VOL_RATIO_RANGE[0] <= best.vol_ratio <= VOL_RATIO_RANGE[1]):
-        return None
-    return best
+    return diagnose(new, old, is_index)[0]
 
 
 def apply_calibration(new: pd.DataFrame, cal: Calibration, ticker: str) -> Optional[pd.DataFrame]:
@@ -243,16 +260,17 @@ class PriceFetcher:
         frame = tv_raw_to_frame(raw)
         if frame is None:
             return Result(None, "none", "dữ liệu TradingView sai định dạng")
-        cal = calibrate(frame, old, is_index)
+        cal, info = diagnose(frame, old, is_index)
         if cal is None:
-            return Result(None, "none", "dữ liệu TradingView không khớp lịch sử (đơn vị/điều chỉnh giá/khối lượng)")
+            return Result(None, "none", "dữ liệu TradingView không khớp lịch sử: " + info["reason"])
         out = apply_calibration(frame, cal, ticker)
         if out is None:
             return Result(None, "none", "dữ liệu TradingView không hợp lệ sau chuẩn hoá")
         if out["date"].max().normalize() < old.index.max():
             return Result(None, "none", "dữ liệu TradingView cũ hơn dữ liệu hiện có")
+        out = out[out["date"].dt.normalize() >= old.index.max() - pd.Timedelta(days=MERGE_BACK_DAYS)]   # chỉ nối phần mới vào đuôi
         self.calib_votes[(cal.shift_days, cal.scale)] += 1
-        return Result(out, "tv", f"khớp {cal.match:.0%}/{cal.overlap} phiên, lệch ngày {cal.shift_days:+d}, hệ số giá {cal.scale:g}", ex)
+        return Result(out, "tv", f"khớp {cal.match:.0%} ({RECENT_WINDOW} phiên gần nhất, toàn bộ {cal.match_all:.0%}/{cal.overlap}), lệch ngày {cal.shift_days:+d}, hệ số giá {cal.scale:g}", ex)
 
     # ---- vnstock ----
     def _get_vn(self):
