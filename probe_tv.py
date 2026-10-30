@@ -11,7 +11,7 @@ import time
 
 import pandas as pd
 
-from price_sources import calibrate, load_history, tv_raw_to_frame, TV_EXCHANGES
+from price_sources import diagnose, load_history, tv_raw_to_frame, TV_EXCHANGES
 
 CSV = "gia_lich_su_rs.csv"
 SYMBOLS = "danh_sach_ma_theo_nganh.csv"
@@ -38,7 +38,7 @@ def main():
     sample = syms[::step][:N_SAMPLE] + SAMPLE_EXTRA
     out("| Mã | Sàn tìm thấy | Số nến | Nến cuối (thô) | Giá đóng thô | Giá đóng CSV | Khớp | Lệch ngày | Hệ số giá | Tỷ lệ KL | Thời gian |")
     out("|---|---|---|---|---|---|---|---|---|---|---|")
-    verdicts = []
+    verdicts, detail = [], []
     for t in sample:
         is_idx = t == "VNINDEX"
         found = None
@@ -60,16 +60,25 @@ def main():
         ex, raw = found
         frame = tv_raw_to_frame(raw)
         old = history.get(t)
-        cal = calibrate(frame, old, is_idx) if (frame is not None and old is not None) else None
+        cal, info = diagnose(frame, old, is_idx) if (frame is not None and old is not None) else (None, {"best": None, "reason": "không có dữ liệu để đối chiếu"})
         last = raw.index[-1]
         old_last = f"{old['close'].iloc[-1]:g} ({old.index[-1]:%Y-%m-%d})" if old is not None and len(old) else "-"
         if cal:
-            out(f"| {t} | {ex} | {len(raw)} | {last} | {raw['close'].iloc[-1]:g} | {old_last} | {cal.match:.0%}/{cal.overlap} | "
+            out(f"| {t} | {ex} | {len(raw)} | {last} | {raw['close'].iloc[-1]:g} | {old_last} | {cal.match:.0%} (20 phiên) / {cal.match_all:.0%} (toàn bộ {cal.overlap}) | "
                 f"{cal.shift_days:+d} | {cal.scale:g} | {cal.vol_ratio if cal.vol_ratio is None else round(cal.vol_ratio, 3)} | {dt:.1f}s |")
         else:
-            out(f"| {t} | {ex} | {len(raw)} | {last} | {raw['close'].iloc[-1]:g} | {old_last} | KHÔNG KHỚP | | | | {dt:.1f}s |")
+            out(f"| {t} | {ex} | {len(raw)} | {last} | {raw['close'].iloc[-1]:g} | {old_last} | KHÔNG KHỚP: {info['reason']} | | | | {dt:.1f}s |")
+            b = info.get("best")
+            if b is not None:
+                tail = pd.DataFrame({"TV (đã quy đổi)": b["a"], "CSV": b["b"], "lệch": (b["rel"] * 100).round(2)}).tail(6)
+                detail.append(f"\n**{t}** — lệch ngày {b['shift']:+d}, hệ số {b['scale']:g}, 6 phiên chung gần nhất:\n\n" + tail.to_markdown())
         verdicts.append((t, cal))
         time.sleep(1)
+
+    if detail:
+        out("\n### Chi tiết các mã không khớp (lệch tính theo %)")
+        for d in detail:
+            out(d)
 
     # thử lấy nhiều nến nhất có thể (bản ẩn danh có thể bị giới hạn)
     out("\n### Số nến tối đa (MWG, HOSE)")
