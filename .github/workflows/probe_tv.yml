@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"
 
       - name: Cài thư viện tối thiểu
-        run: pip install pandas numpy "tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git"
+        run: pip install pandas numpy tabulate "tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git"
 
       - name: Thăm dò
         env:
