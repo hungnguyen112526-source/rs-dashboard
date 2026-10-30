@@ -40,7 +40,7 @@ def block_return(prices: pd.Series, block_index: int, block_size: int) -> float:
 def raw_score_to_rs(raw: pd.Series) -> pd.Series:
     n = len(raw)
     rank = raw.rank(method="min", ascending=False)
-    return (((n - rank) / n) * 99 + 1).round(0).astype(int)
+    return (((n - rank) / n) * 99 + 1).round(0).clip(1, 99).astype(int)   # kẹp 1-99: mã đứng đầu làm tròn 99,5 -> 100
 
 
 def weekly_close(df: pd.DataFrame) -> pd.DataFrame:

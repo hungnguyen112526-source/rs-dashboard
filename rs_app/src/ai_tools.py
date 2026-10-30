@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
-import numpy as np
 import pandas as pd
 
 VN_TZ = timezone(timedelta(hours=7))

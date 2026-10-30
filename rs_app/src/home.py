@@ -4,8 +4,6 @@ import html
 import pandas as pd
 import streamlit as st
 
-from src import ui
-
 HERO_CSS = """
 <style>
 .home-hero { padding: .4rem 0 .2rem; }
