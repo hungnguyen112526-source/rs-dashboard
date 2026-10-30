@@ -249,3 +249,27 @@ def test_diagnose_reports_reason():
     raw["close"] *= 1.2
     cal, info = price_sources.diagnose(price_sources.tv_raw_to_frame(raw), old)
     assert cal is None and "khớp" in info["reason"] and info["best"] is not None
+
+
+def test_rejected_data_does_not_trip_breaker_and_good_tickers_still_use_tv():
+    """Vài mã liên tiếp bị loại vì khối lượng lệch thang (vd MWG, FRT) chỉ chuyển riêng các mã đó sang vnstock,
+    không được tắt TradingView cho những mã dữ liệu tốt phía sau."""
+    old = make_old()
+    bad = tv_from(old, vol_mult=1.5)
+    good = tv_from(old)
+    data = {(f"B{i}", "HOSE"): bad for i in range(6)}
+    data[("G", "HOSE")] = good
+    tv, vn = FakeTV(data), FakeVN()
+    hist = {f"B{i}": old for i in range(6)}
+    hist["G"] = old
+    f = fetcher(tv, vn, hist, breaker=3, exchange_map={k[0]: "HOSE" for k in data})
+    assert [f.fetch(f"B{i}").source for i in range(6)] == ["vnstock"] * 6
+    assert not f.tv_disabled
+    assert f.fetch("G").source == "tv"
+
+
+def test_rs_scale_is_capped_to_1_99():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rs_app"))
+    from src.engine import raw_score_to_rs
+    rs = raw_score_to_rs(pd.Series(np.arange(300, dtype=float)))
+    assert rs.max() == 99 and rs.min() == 1
