@@ -9,7 +9,10 @@ Nguyên tắc an toàn:
   và độ lệch ngày (múi giờ của nến) của TradingView, nên không cần đoán trước.
 - Không khớp / lỗi / rỗng / cũ hơn dữ liệu hiện có  ->  dùng vnstock cho đúng mã đó.
 - Ngắt mạch: TradingView lỗi liên tiếp BREAKER lần  ->  phần còn lại của lần chạy dùng vnstock.
-- Mã chưa có lịch sử trong CSV (không có gì để đối chiếu) hoặc FULL_REFRESH  ->  vnstock lấy toàn bộ lịch sử.
+- Mã chưa có lịch sử trong CSV (không có gì để đối chiếu)  ->  vnstock lấy toàn bộ lịch sử.
+- FULL_REFRESH: TradingView lấy tối đa FULL_REFRESH_BARS nến ngày (toàn bộ lịch sử có thể lấy) và GHI TOÀN BỘ số nến đó
+  (không giới hạn ở phần đuôi). Vẫn phải qua bước đối chiếu 20 phiên gần nhất như thường; mã bị loại / lỗi -> vnstock lấy
+  toàn bộ lịch sử từ history_start. Muốn lấy toàn bộ bằng vnstock như trước: PRICE_SOURCE=vnstock + FULL_REFRESH=1.
 
 Biến môi trường (đọc ở fetch_data.py): PRICE_SOURCE=auto|tv|vnstock, FULL_REFRESH=1, TV_BARS, TV_USERNAME/TV_PASSWORD.
 """
@@ -34,6 +37,8 @@ MIN_MATCH = 0.90         # tỷ lệ phiên chồng lấn phải khớp
 MIN_OVERLAP = 10         # số phiên chồng lấn tối thiểu để đối chiếu
 RECENT_WINDOW = 20       # chỉ đối chiếu giá/khối lượng ở ngần này phiên chồng lấn gần nhất (điều chỉnh giá cũ không làm hỏng việc nhận dữ liệu)
 MERGE_BACK_DAYS = 5      # chỉ ghi các nến từ (ngày cuối trong CSV - 5 ngày) trở đi; lịch sử cũ giữ nguyên, không bị TradingView ghi đè
+                         # (bỏ giới hạn này khi FULL_REFRESH: ghi toàn bộ số nến TradingView trả về)
+FULL_REFRESH_BARS = 5000 # số nến ngày tối đa xin TradingView khi FULL_REFRESH (giới hạn của tvdatafeed ~5000 nến/lần gọi)
 VOL_RATIO_RANGE = (0.9, 1.1)   # trung vị KL mới / KL cũ phải nằm trong khoảng này
 SESSION_OFFSET = pd.Timedelta(hours=7)   # CSV cũ lưu ngày dạng "YYYY-MM-DD 07:00:00"
 
@@ -218,9 +223,9 @@ class PriceFetcher:
     def __post_init__(self):
         self._tv = None
         self._vn = None
-        self.tv_disabled = self.mode == "vnstock" or self.full_refresh
+        self.tv_disabled = self.mode == "vnstock"
         self.tv_fail_streak = 0
-        self.tv_disabled_reason = "PRICE_SOURCE=vnstock" if self.mode == "vnstock" else ("FULL_REFRESH" if self.full_refresh else "")
+        self.tv_disabled_reason = "PRICE_SOURCE=vnstock" if self.mode == "vnstock" else ""
         self.calib_votes: Counter = Counter()
         self.log: dict = {}
 
@@ -240,11 +245,12 @@ class PriceFetcher:
         if is_index:
             order = order[:1] if cached else ["HOSE"]
         from tvDatafeed import Interval  # nhập muộn: kiểm thử không cần cài thư viện
+        n_bars = max(self.tv_bars, FULL_REFRESH_BARS) if self.full_refresh else self.tv_bars
         for ex in order:
             raw = None
             for attempt in range(2):
                 try:
-                    raw = tv.get_hist(symbol=ticker, exchange=ex, interval=Interval.in_daily, n_bars=self.tv_bars)
+                    raw = tv.get_hist(symbol=ticker, exchange=ex, interval=Interval.in_daily, n_bars=n_bars)
                     break
                 except Exception:  # noqa: BLE001
                     if attempt == 1:
@@ -273,7 +279,8 @@ class PriceFetcher:
             return Result(None, "none", "dữ liệu TradingView không hợp lệ sau chuẩn hoá")
         if out["date"].max().normalize() < old.index.max():
             return Result(None, "none", "dữ liệu TradingView cũ hơn dữ liệu hiện có")
-        out = out[out["date"].dt.normalize() >= old.index.max() - pd.Timedelta(days=MERGE_BACK_DAYS)]   # chỉ nối phần mới vào đuôi
+        if not self.full_refresh:   # chạy thường: chỉ nối phần đuôi; FULL_REFRESH: ghi toàn bộ lịch sử TradingView trả về
+            out = out[out["date"].dt.normalize() >= old.index.max() - pd.Timedelta(days=MERGE_BACK_DAYS)]
         self.calib_votes[(cal.shift_days, cal.scale)] += 1
         return Result(out, "tv", f"khớp {cal.match:.0%} ({RECENT_WINDOW} phiên gần nhất, toàn bộ {cal.match_all:.0%}/{cal.overlap}), lệch ngày {cal.shift_days:+d}, hệ số giá {cal.scale:g}", ex)
 

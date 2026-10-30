@@ -3,15 +3,18 @@ Script trích xuất dữ liệu giá cho toàn bộ mã trong danh_sach_ma_theo
 chạy tự động (GitHub Actions) — không cần nhập API key tương tác.
 
 Nguồn dữ liệu (xem price_sources.py):
-  - Chính: TradingView qua tvdatafeed (không cần khoá; chỉ lấy ~TV_BARS nến gần nhất rồi gộp vào CSV hiện có,
-    sau khi đối chiếu khớp với lịch sử đang có).
-  - Dự phòng: vnstock (cần VNSTOCK_API_KEY) cho mã nào TradingView lỗi/không khớp, mã mới chưa có lịch sử,
-    hoặc khi FULL_REFRESH=1 (lấy lại toàn bộ lịch sử để "tự chữa" các lần điều chỉnh giá).
+  - Chính: TradingView qua tvdatafeed (không cần khoá; chạy thường chỉ lấy ~TV_BARS nến gần nhất rồi gộp phần đuôi
+    vào CSV hiện có, sau khi đối chiếu khớp với lịch sử đang có).
+  - FULL_REFRESH=1: cũng dùng TradingView nhưng xin tối đa 5000 nến ngày (toàn bộ lịch sử) và ghi toàn bộ số nến đó
+    (vẫn phải qua bước đối chiếu 20 phiên gần nhất) để "tự chữa" các lần điều chỉnh giá.
+  - Dự phòng: vnstock (cần VNSTOCK_API_KEY) cho mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử
+    (các mã này lấy toàn bộ lịch sử từ HISTORY_START khi FULL_REFRESH=1).
 
 Biến môi trường:
   PRICE_SOURCE    auto (mặc định: TradingView rồi vnstock) | tv (chỉ TradingView) | vnstock (như cách cũ)
-  FULL_REFRESH    1/true -> bỏ qua TradingView, lấy toàn bộ lịch sử từ vnstock
-  TV_BARS         số nến ngày gần nhất lấy từ TradingView (mặc định 150)
+  FULL_REFRESH    1/true -> lấy toàn bộ lịch sử (TradingView tối đa 5000 nến, ghi toàn bộ; lỗi/không khớp -> vnstock).
+                  Muốn lấy toàn bộ bằng vnstock như trước: PRICE_SOURCE=vnstock + FULL_REFRESH=1
+  TV_BARS         số nến ngày gần nhất lấy từ TradingView khi chạy thường (mặc định 150)
   TV_USERNAME / TV_PASSWORD   (tuỳ chọn) đăng nhập TradingView thay vì ẩn danh
   VNSTOCK_API_KEY             chỉ cần khi phải dùng vnstock
   HISTORY_START   ngày bắt đầu lịch sử khi lấy từ vnstock (mặc định 2015-01-01)
@@ -189,7 +192,7 @@ def main():
           + (f" | TradingView tắt: {summary['tv_disabled_reason']}" if summary["tv_disabled"] else ""))
     if got < WARN_FRESH_RATIO * len(tickers):
         print(f"::warning::Chỉ lấy được {got}/{len(tickers)} mã giá mới (dưới {WARN_FRESH_RATIO:.0%}).")
-    if summary["tv_disabled"] and PRICE_SOURCE == "auto" and not FULL_REFRESH:
+    if summary["tv_disabled"] and PRICE_SOURCE == "auto":
         print(f"::warning::TradingView bị tắt trong lần chạy này ({summary['tv_disabled_reason']}); đã dùng vnstock.")
 
 
