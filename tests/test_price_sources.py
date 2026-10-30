@@ -17,6 +17,7 @@ _fake.Interval = types.SimpleNamespace(in_daily="1D")
 sys.modules.setdefault("tvDatafeed", _fake)
 
 import fetch_data  # noqa: E402
+import price_sources  # noqa: E402
 from price_sources import PriceFetcher, calibrate, tv_raw_to_frame  # noqa: E402
 
 DAYS = pd.bdate_range("2026-06-01", periods=60)      # 60 phiên
@@ -92,9 +93,10 @@ def test_tv_primary_and_normalised_output():
     assert res.source == "tv" and res.exchange == "HOSE" and not vn.calls
     out = res.df
     assert list(out.columns) == ["date", "open", "high", "low", "close", "volume", "ticker"]
-    assert (out["date"].dt.normalize().values == old.index.values).all()       # ngày khớp lịch sử
+    tail = old.loc[old.index >= old.index.max() - pd.Timedelta(days=price_sources.MERGE_BACK_DAYS)]
+    assert (out["date"].dt.normalize().values == tail.index.values).all()      # chỉ nối phần đuôi, ngày khớp lịch sử
     assert (out["date"].dt.hour == 7).all()                                  # cùng dạng 07:00:00 như CSV cũ
-    assert np.allclose(out["close"].values, old["close"].values, rtol=1e-3)  # đã chia 1000
+    assert np.allclose(out["close"].values, tail["close"].values, rtol=1e-3)  # đã chia 1000
     assert f.exchange_map["AAA"] == "HOSE"
 
 
@@ -199,7 +201,7 @@ def test_index_never_rescaled_and_uses_hose():
     old = make_old(close_start=1700)
     tv = FakeTV({("VNINDEX", "HOSE"): tv_from(old)})
     res = fetcher(tv, FakeVN(), {"VNINDEX": old}).fetch("VNINDEX", is_index=True)
-    assert res.source == "tv" and np.allclose(res.df["close"].values, old["close"].values, rtol=1e-6)
+    assert res.source == "tv" and np.allclose(res.df["close"].values, old["close"].values[-len(res.df):], rtol=1e-6)
     assert {c[1] for c in tv.calls} == {"HOSE"}
 
 
@@ -230,3 +232,20 @@ def test_merge_with_existing_new_wins_and_old_kept(tmp_path):
                         "close": [11.5, 12.0], "volume": 6, "ticker": "A", "industry": "X", "nhom": None})
     m = fetch_data.merge_with_existing(new, str(p))
     assert list(m["close"]) == [10.0, 11.5, 12.0]
+
+
+def test_old_price_adjustment_does_not_block_recent_match():
+    """Giá cũ bị điều chỉnh (cổ tức...) khác CSV nhưng 20 phiên gần nhất khớp -> vẫn nhận."""
+    old = make_old()
+    raw = tv_from(old, scale=1000)
+    raw.iloc[:-30, raw.columns.get_loc("close")] *= 0.9
+    cal, info = price_sources.diagnose(price_sources.tv_raw_to_frame(raw), old)
+    assert cal is not None and cal.match >= 0.99 and cal.match_all < 0.9
+
+
+def test_diagnose_reports_reason():
+    old = make_old()
+    raw = tv_from(old, scale=1000)
+    raw["close"] *= 1.2
+    cal, info = price_sources.diagnose(price_sources.tv_raw_to_frame(raw), old)
+    assert cal is None and "khớp" in info["reason"] and info["best"] is not None
