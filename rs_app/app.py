@@ -75,6 +75,20 @@ with st.sidebar:
     with st.container(key="side_foot"):
         night.render(night.toggle())
         st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
+        _src = pages_extra.load_json("price_source_log.json")     # do fetch_data.py ghi (nguồn giá của từng mã)
+        if isinstance(_src, dict) and _src.get("counts"):
+            _c = _src["counts"]
+            st.caption(f"Nguồn giá: TradingView {_c.get('tv', 0)} · vnstock {_c.get('vnstock', 0)}"
+                       + (" · TradingView đang tắt" if _src.get("tv_disabled") else "")
+                       + (f" · cập nhật {_src['updated_at']}" if _src.get("updated_at") else ""))
+            if is_admin:
+                _fb = {t: v for t, v in (_src.get("tickers") or {}).items() if v.get("source") != "tv"}
+                if _fb or _src.get("tv_disabled"):
+                    with st.expander(f"Mã dùng nguồn dự phòng ({len(_fb)})"):
+                        if _src.get("tv_disabled_reason"):
+                            st.caption(f"Lý do TradingView tắt: {_src['tv_disabled_reason']}")
+                        for t, v in list(_fb.items())[:60]:
+                            st.caption(f"**{t}** · {v.get('source')} · {v.get('note', '')}")
 
 
 @st.cache_data(ttl=600)
