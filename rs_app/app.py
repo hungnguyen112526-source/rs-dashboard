@@ -412,21 +412,28 @@ sections = {
 if is_admin:
     sections["Quản trị"] = [st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin")]
 PAGE_BY_PATH = {p.url_path: p for group in sections.values() for p in group}
-def render_nav(groups: dict, container) -> None:
+SECTION_ICONS = {"Phân tích kỹ thuật": "📈", "Phân tích vĩ mô": "🌐", "Tin tức & BCTC": "📰"}
+
+
+def render_nav(groups: dict, container, current) -> None:
     """Menu mục lục tự vẽ (st.navigation chỉ dùng để định tuyến, position="hidden").
-    Mục nhiều trang: tiêu đề nhỏ + danh sách trang. Mục chỉ có 1 trang: hiện thẳng như một mục lớn, không lặp tên."""
+    Mục nhiều trang: khối bấm để thu gọn/mở ra, tự mở mục đang xem. Mục chỉ có 1 trang: bấm thẳng, không lặp tên."""
+    cur = getattr(current, "url_path", None)
     with container:
         for name, group in groups.items():
             if name and len(group) > 1:
-                st.html(f'<div class="nav-sec">{html.escape(name)}</div>')
-            elif name:
-                st.html('<div class="nav-gap"></div>')
-            for pg in group:
-                st.page_link(pg, label=pg.title, icon=pg.icon, width="stretch")
+                label = f"{SECTION_ICONS.get(name, '')} {name}".strip()
+                with st.expander(label, expanded=any(pg.url_path == cur for pg in group)):
+                    for pg in group:
+                        st.page_link(pg, label=pg.title, icon=pg.icon, width="stretch")
+            else:
+                for pg in group:
+                    with st.container(key=f"nav_top_{pg.url_path}"):
+                        st.page_link(pg, label=pg.title, icon=pg.icon, width="stretch")
 
 
 current_page = st.navigation(sections, position="hidden")
-render_nav(sections, nav_slot)
+render_nav(sections, nav_slot, current_page)
 current_page.run()
 
 
