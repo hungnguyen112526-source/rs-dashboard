@@ -49,6 +49,11 @@ REJECTED_PREFIXES = ("chưa có lịch sử", "dữ liệu TradingView không kh
                      "dữ liệu TradingView không hợp lệ")
 
 
+VN_RL_RETRIES = 3        # số lần thử lại 1 mã khi vnstock báo vượt hạn mức
+VN_RL_WAIT = 30          # giây chờ trước khi thử lại (vnstock thường báo chờ ~23 giây)
+VN_RL_HINTS = ("rate limit", "hạn mức", "ha n muc", "429", "too many requests")
+
+
 class SourceError(Exception):
     """Nguồn không dùng được (thiếu khoá, thư viện, mạng...)."""
 
@@ -58,8 +63,9 @@ class SourceError(Exception):
 # ----------------------------------------------------------------------------
 
 class RateLimiter:
-    """Giãn đều các lần gọi API: mỗi lần cách lần trước tối thiểu 60/rpm giây (tính từ lúc BẮT ĐẦU gọi, không cộng
-    thời gian chờ phản hồi). Thay cho time.sleep(5) cố định: chỉ chờ phần còn thiếu nên tận dụng gần hết hạn mức."""
+    """Giãn đều các lần gọi API: mỗi request cách request trước tối thiểu 60/rpm giây (tính từ lúc BẮT ĐẦU gọi).
+    Thay cho time.sleep(5) cố định: chỉ chờ phần còn thiếu. acquire(n): đặt chỗ n request cùng lúc (khi 1 lần lấy
+    giá thực tế tốn n request). slow_down(): giãn thêm khi server báo vượt hạn mức."""
 
     def __init__(self, rpm: float = 55, clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep):
@@ -68,14 +74,18 @@ class RateLimiter:
         self._next = 0.0
         self._lock = threading.Lock()
 
-    def acquire(self) -> None:
-        with self._lock:                      # đặt chỗ 1 "khe" thời gian; an toàn nếu sau này dùng nhiều luồng
+    def acquire(self, n: int = 1) -> None:
+        with self._lock:                      # đặt chỗ các "khe" thời gian; an toàn nếu sau này dùng nhiều luồng
             now = self._clock()
             slot = max(now, self._next)
-            self._next = slot + self.interval
+            self._next = slot + self.interval * max(n, 1)
         wait = slot - now
         if wait > 0:
             self._sleep(wait)
+
+    def slow_down(self, factor: float = 1.5) -> None:
+        with self._lock:
+            self.interval *= factor
 
 
 # ----------------------------------------------------------------------------
@@ -244,6 +254,7 @@ class PriceFetcher:
     breaker: int = 5
     tv_sleep: float = 1.0
     vn_limiter: Optional[RateLimiter] = None      # None = không giới hạn (kiểm thử)
+    vn_calls_per_fetch: int = 2                   # số request vnstock thực tế tốn cho 1 mã (xem VN_CALLS_PER_FETCH)
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], pd.Timestamp] = pd.Timestamp.today
 
@@ -325,12 +336,31 @@ class PriceFetcher:
             return self.history_start
         return str(max(pd.Timestamp(self.history_start), old.index.max() - pd.Timedelta(days=45)).date())
 
+    def _vn_request(self, ticker: str, is_index: bool):
+        """Gọi vnstock cho 1 mã, có giãn cách + tự chờ/thử lại khi vượt hạn mức.
+        Lưu ý: khi hết hạn mức, thư viện vnstock có thể tự gọi sys.exit() (SystemExit - KHÔNG phải Exception) làm cả script
+        chết giữa chừng, nên phải bắt riêng SystemExit."""
+        for attempt in range(VN_RL_RETRIES + 1):
+            if self.vn_limiter:
+                self.vn_limiter.acquire(self.vn_calls_per_fetch)
+            try:
+                market = self._get_vn()
+                obj = market.index(symbol=ticker) if is_index else market.equity(symbol=ticker)
+                return vnstock_ohlcv(obj, self._vn_start(ticker))
+            except SystemExit:
+                pass
+            except Exception as e:  # noqa: BLE001
+                if not any(h in str(e).lower() for h in VN_RL_HINTS):
+                    raise
+            if attempt == VN_RL_RETRIES:
+                raise SourceError("vnstock vượt hạn mức")
+            print(f"   >> {ticker}: vnstock báo vượt hạn mức, chờ {VN_RL_WAIT}s rồi thử lại ({attempt + 1}/{VN_RL_RETRIES}) và giãn cách thêm...")
+            self.sleep(VN_RL_WAIT)
+            if self.vn_limiter:
+                self.vn_limiter.slow_down()
+
     def _try_vn(self, ticker: str, is_index: bool) -> Result:
-        market = self._get_vn()
-        if self.vn_limiter:
-            self.vn_limiter.acquire()
-        obj = market.index(symbol=ticker) if is_index else market.equity(symbol=ticker)
-        df = vnstock_frame(vnstock_ohlcv(obj, self._vn_start(ticker)), ticker)
+        df = vnstock_frame(self._vn_request(ticker, is_index), ticker)
         if df is None:
             return Result(None, "none", "vnstock không có dữ liệu")
         return Result(df, "vnstock", f"từ {self._vn_start(ticker)}")
