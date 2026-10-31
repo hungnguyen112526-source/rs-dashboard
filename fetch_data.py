@@ -18,6 +18,7 @@ Biến môi trường:
   TV_USERNAME / TV_PASSWORD   (tuỳ chọn) đăng nhập TradingView thay vì ẩn danh
   VNSTOCK_API_KEY             chỉ cần khi phải dùng vnstock
   VN_RPM          số request/phút tối đa gửi vnstock (mặc định 55, gói cộng đồng giới hạn 60)
+  VN_CALLS_PER_FETCH  số request vnstock thực tế tốn cho 1 mã (mặc định 2; hạ về 1 nếu log cho thấy không bị vượt hạn mức)
   HISTORY_START   ngày bắt đầu lịch sử khi lấy từ vnstock (mặc định 2015-01-01)
 
 Đầu ra: gia_lich_su_rs.csv (như cũ), price_source_log.json (mỗi mã lấy từ nguồn nào), tv_exchange_map.json.
@@ -43,6 +44,7 @@ PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "auto").strip().lower()
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes")
 TV_BARS = int(os.environ.get("TV_BARS", "150") or 150)
 VN_RPM = float(os.environ.get("VN_RPM", "55") or 55)   # số request/phút tối đa gửi vnstock (giới hạn gói cộng đồng: 60)
+VN_CALLS_PER_FETCH = int(os.environ.get("VN_CALLS_PER_FETCH", "2") or 2)   # số request vnstock thực tế tốn cho 1 mã
 WARN_FRESH_RATIO = 0.90              # < 90% số mã lấy được thì cảnh báo trên GitHub Actions
 
 
@@ -128,7 +130,7 @@ def main():
         tv_factory=make_tv, vn_factory=make_vnstock,
         exchange_map=load_json(EXCHANGE_MAP_FILE, {}) or {},
         tv_bars=TV_BARS, full_refresh=FULL_REFRESH,
-        vn_limiter=RateLimiter(VN_RPM),
+        vn_limiter=RateLimiter(VN_RPM), vn_calls_per_fetch=VN_CALLS_PER_FETCH,
     )
 
     # --- Vòng chính + thử lại 1 lần cho mã lỗi ---
