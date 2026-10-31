@@ -22,7 +22,7 @@ except ImportError:      # thiếu rs_app/src/watch.py thì chỉ trang Theo dõ
     watch = None
 try:
     from src import paper, paper_engine  # noqa: E402
-except ImportError:      # thiếu file giao dịch thử thì chỉ trang Giao dịch thử báo lỗi, không sập cả app
+except ImportError:      # thiếu file giao dịch giả lập thì chỉ trang Giao dịch giả lập báo lỗi, không sập cả app
     paper = paper_engine = None
 
 ASSETS = next((d for d in (ROOT / "assets", ROOT.parent / "assets") if d.is_dir()), ROOT / "assets")
@@ -393,7 +393,7 @@ pages = [
     st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
     st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
     st.Page(page_watch, title="Theo dõi", icon="⭐", url_path="theodoi"),
-    st.Page(page_paper, title="Giao dịch thử", icon="🎮", url_path="giaodich"),
+    st.Page(page_paper, title="Giao dịch giả lập", icon="🎮", url_path="giaodich"),
     st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
     st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
     st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
