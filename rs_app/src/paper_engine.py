@@ -16,8 +16,21 @@ FEE_RATE = 0.0015               # phí môi giới mỗi chiều (0,15%)
 SELL_TAX_RATE = 0.001           # thuế bán (0,1%)
 SETTLE_SESSIONS = 2             # T+2: mua phiên T, bán được từ phiên T+2
 DEFAULT_START_CASH = 1_000_000_000
-START_CASH_OPTIONS = [500_000_000, 1_000_000_000, 2_000_000_000, 5_000_000_000]
+MIN_START_CASH = 1_000_000            # vốn ban đầu tự nhập: từ 1 triệu
+MAX_START_CASH = 1_000_000_000_000    # đến 1.000 tỷ
 MAX_TRADES = 3000               # chặn để dữ liệu mỗi người không vượt giới hạn 1MB/lệnh của Redis REST
+
+
+def validate_start_cash(value) -> tuple[bool, str]:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False, "Vốn ban đầu không hợp lệ."
+    if v < MIN_START_CASH:
+        return False, f"Vốn tối thiểu {MIN_START_CASH:,.0f} đ."
+    if v > MAX_START_CASH:
+        return False, f"Vốn tối đa {MAX_START_CASH:,.0f} đ."
+    return True, ""
 
 
 def to_vnd(price_k: float) -> float:

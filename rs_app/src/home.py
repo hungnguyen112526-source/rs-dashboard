@@ -34,6 +34,16 @@ FEATURES = [
     ("tintuc", "📰", "Tin tức", "Tin mới từ các nguồn báo, lọc theo chuyên mục và theo mã cổ phiếu."),
     ("vimo", "🌐", "Vĩ mô", "Lãi suất, lạm phát, tỷ giá, vàng, dầu, trái phiếu và dự báo của Fed."),
     ("lich", "📅", "Lịch kinh tế", "Các sự kiện kinh tế sắp diễn ra trong nước và thế giới."),
+    ("giaodich", "🎮", "Giao dịch giả lập", "Tập giao dịch bằng vốn ảo theo giá mới nhất: đặt lệnh, xem danh mục và so hiệu suất với VNINDEX."),
+]
+
+# Các mục lớn của menu (giữ khớp với `sections` trong app.py): (tên mục, [mã trang trong FEATURES])
+SECTIONS = [
+    ("Phân tích kỹ thuật", ["rs", "dongtien", "klgd"]),
+    ("Phân tích vĩ mô", ["vimo", "lich"]),
+    ("Tin tức & BCTC", ["tintuc", "bctc"]),
+    ("Theo dõi", ["theodoi"]),
+    ("Giao dịch giả lập", ["giaodich"]),
 ]
 
 
@@ -93,9 +103,11 @@ def render(user: dict, as_of: str, vnindex: pd.DataFrame, scores: pd.DataFrame, 
 
     # ---- Web có những gì ----
     st.subheader("Web có những gì?")
-    for row in (FEATURES[:4], FEATURES[4:]):
+    by_path = {f[0]: f for f in FEATURES}
+    for section_name, paths in SECTIONS:
+        st.markdown(f"##### {section_name}")
         cols = st.columns(4)
-        for col, (path, icon, title, text) in zip(cols, row):
+        for col, (path, icon, title, text) in zip(cols, [by_path[p] for p in paths]):
             with col.container(border=True, key=f"card_home_f_{path}"):
                 st.html(f'<div class="home-card-title">{icon} {title}</div><div class="home-card-text">{text}</div>')
                 page = pages.get(path)

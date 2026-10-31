@@ -16,6 +16,15 @@ def _vnd(x: float) -> str:
     return f"{x:,.0f} đ"
 
 
+def _cash_input(label: str, key: str, container=None) -> int:
+    """Ô nhập vốn tự do (đồng), kèm dòng đọc lại số tiền cho dễ nhìn."""
+    box = container or st
+    v = box.number_input(label, min_value=pe.MIN_START_CASH, max_value=pe.MAX_START_CASH,
+                         value=pe.DEFAULT_START_CASH, step=10_000_000, format="%d", key=key)
+    box.caption(f"= {_vnd(v)}" + (f" (~{v / 1e9:,.2f} tỷ)" if v >= 1e9 else f" (~{v / 1e6:,.0f} triệu)"))
+    return int(v)
+
+
 def _midsession(date_str: str, now: datetime) -> bool:
     return date_str == f"{now:%Y-%m-%d}" and now.weekday() < 5 and 9 <= now.hour < 15
 
@@ -62,10 +71,13 @@ def render(stocks: pd.DataFrame, vnindex: pd.DataFrame, username: str, scores: p
     with st.expander("⚙️ Đặt lại tài khoản"):
         st.caption("Xoá toàn bộ lệnh và bắt đầu lại với số vốn mới. Không hoàn tác được.")
         c1, c2 = st.columns([2, 1], vertical_alignment="bottom")
-        cash = c1.selectbox("Vốn mới", pe.START_CASH_OPTIONS, index=pe.START_CASH_OPTIONS.index(pe.DEFAULT_START_CASH),
-                            format_func=_vnd, key="pt_reset_cash")
+        cash = _cash_input("Vốn mới (đồng)", "pt_reset_cash", container=c1)
         sure = c1.checkbox("Tôi hiểu toàn bộ lệnh hiện tại sẽ bị xoá", key="pt_reset_sure")
         if c2.button("Đặt lại", disabled=not sure, width="stretch", key="pt_reset_btn"):
+            ok, msg = pe.validate_start_cash(cash)
+            if not ok:
+                st.error(msg)
+                return
             paper_store.create_account(username, cash, f"{now:%Y-%m-%d}")
             st.toast("Đã đặt lại tài khoản")
             st.rerun()
@@ -73,11 +85,14 @@ def render(stocks: pd.DataFrame, vnindex: pd.DataFrame, username: str, scores: p
 
 def _render_create(username: str, today: str) -> None:
     st.info("Bạn chưa có tài khoản giao dịch giả lập. Chọn số vốn ban đầu để bắt đầu.")
-    cash = st.selectbox("Vốn ban đầu", pe.START_CASH_OPTIONS, index=pe.START_CASH_OPTIONS.index(pe.DEFAULT_START_CASH),
-                        format_func=_vnd, key="pt_new_cash")
+    cash = _cash_input("Vốn ban đầu (đồng)", "pt_new_cash")
     st.caption(f"Quy tắc: lô {pe.LOT} cổ phiếu · phí {pe.FEE_RATE:.2%} mỗi chiều · thuế bán {pe.SELL_TAX_RATE:.2%} · "
                f"mua xong phải qua T+{pe.SETTLE_SESSIONS} mới bán được · không bán khống, không margin.")
     if st.button("Tạo tài khoản", type="primary", key="pt_create_btn"):
+        ok, msg = pe.validate_start_cash(cash)
+        if not ok:
+            st.error(msg)
+            return
         paper_store.create_account(username, cash, today)
         st.rerun()
 
