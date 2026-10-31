@@ -20,6 +20,10 @@ try:
     from src import watch  # noqa: E402
 except ImportError:      # thiếu rs_app/src/watch.py thì chỉ trang Theo dõi báo lỗi, không sập cả app
     watch = None
+try:
+    from src import paper, paper_engine  # noqa: E402
+except ImportError:      # thiếu file giao dịch thử thì chỉ trang Giao dịch thử báo lỗi, không sập cả app
+    paper = paper_engine = None
 
 ASSETS = next((d for d in (ROOT / "assets", ROOT.parent / "assets") if d.is_dir()), ROOT / "assets")
 _FAVICON, _LOGO = ASSETS / "favicon-192.png", ASSETS / "logo.png"
@@ -89,6 +93,12 @@ with st.sidebar:
                             st.caption(f"Lý do TradingView tắt: {_src['tv_disabled_reason']}")
                         for t, v in list(_fb.items())[:60]:
                             st.caption(f"**{t}** · {v.get('source')} · {v.get('note', '')}")
+
+
+@st.cache_data(ttl=600)
+def cached_quotes(path_str: str, mtime: float):
+    s, _ = load_all(path_str, mtime)
+    return paper_engine.quote_table(s)
 
 
 @st.cache_data(ttl=600)
@@ -357,6 +367,15 @@ def page_watch():
     watch.render(stocks, user["username"], scores, day_df, pages_extra.load_json("financials_data.json"))
 
 
+def page_paper():
+    if paper is None:
+        st.error("Thiếu file `paper.py`, `paper_engine.py` hoặc `paper_store.py` trong `rs_app/src/` trên GitHub. "
+                 "Hãy up đủ 3 file này rồi Reboot app.")
+        return
+    scores, _ = cached_rs(str(data_path), MTIME, "day")
+    paper.render(stocks, vnindex, user["username"], scores, cached_quotes(str(data_path), MTIME))
+
+
 def page_admin():
     ui.render_admin_page()
 
@@ -374,6 +393,7 @@ pages = [
     st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
     st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
     st.Page(page_watch, title="Theo dõi", icon="⭐", url_path="theodoi"),
+    st.Page(page_paper, title="Giao dịch thử", icon="🎮", url_path="giaodich"),
     st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
     st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
     st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
