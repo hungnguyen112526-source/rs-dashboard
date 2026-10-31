@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -50,6 +51,31 @@ REJECTED_PREFIXES = ("chưa có lịch sử", "dữ liệu TradingView không kh
 
 class SourceError(Exception):
     """Nguồn không dùng được (thiếu khoá, thư viện, mạng...)."""
+
+
+# ----------------------------------------------------------------------------
+# Giới hạn tốc độ gọi API (vnstock bản cộng đồng: 60 request/phút)
+# ----------------------------------------------------------------------------
+
+class RateLimiter:
+    """Giãn đều các lần gọi API: mỗi lần cách lần trước tối thiểu 60/rpm giây (tính từ lúc BẮT ĐẦU gọi, không cộng
+    thời gian chờ phản hồi). Thay cho time.sleep(5) cố định: chỉ chờ phần còn thiếu nên tận dụng gần hết hạn mức."""
+
+    def __init__(self, rpm: float = 55, clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], None] = time.sleep):
+        self.interval = 60.0 / max(float(rpm), 1.0)
+        self._clock, self._sleep = clock, sleep
+        self._next = 0.0
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        with self._lock:                      # đặt chỗ 1 "khe" thời gian; an toàn nếu sau này dùng nhiều luồng
+            now = self._clock()
+            slot = max(now, self._next)
+            self._next = slot + self.interval
+        wait = slot - now
+        if wait > 0:
+            self._sleep(wait)
 
 
 # ----------------------------------------------------------------------------
@@ -217,6 +243,7 @@ class PriceFetcher:
     full_refresh: bool = False
     breaker: int = 5
     tv_sleep: float = 1.0
+    vn_limiter: Optional[RateLimiter] = None      # None = không giới hạn (kiểm thử)
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], pd.Timestamp] = pd.Timestamp.today
 
@@ -300,6 +327,8 @@ class PriceFetcher:
 
     def _try_vn(self, ticker: str, is_index: bool) -> Result:
         market = self._get_vn()
+        if self.vn_limiter:
+            self.vn_limiter.acquire()
         obj = market.index(symbol=ticker) if is_index else market.equity(symbol=ticker)
         df = vnstock_frame(vnstock_ohlcv(obj, self._vn_start(ticker)), ticker)
         if df is None:
