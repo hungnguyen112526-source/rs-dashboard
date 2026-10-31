@@ -76,6 +76,7 @@ with st.sidebar:
                 f'<span class="side-role">{"Quản trị" if is_admin else "Thành viên"}</span></div></div>')
         if st.button("Thoát", icon=":material/logout:", width="stretch", key="logout_btn"):
             auth.logout()
+    nav_slot = st.container(key="side_nav")     # menu mục lục: được vẽ ở cuối file (cần có `sections` trước)
     with st.container(key="side_foot"):
         night.render(night.toggle())
         st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
@@ -411,7 +412,21 @@ sections = {
 if is_admin:
     sections["Quản trị"] = [st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin")]
 PAGE_BY_PATH = {p.url_path: p for group in sections.values() for p in group}
-current_page = st.navigation(sections, position="sidebar")
+def render_nav(groups: dict, container) -> None:
+    """Menu mục lục tự vẽ (st.navigation chỉ dùng để định tuyến, position="hidden").
+    Mục nhiều trang: tiêu đề nhỏ + danh sách trang. Mục chỉ có 1 trang: hiện thẳng như một mục lớn, không lặp tên."""
+    with container:
+        for name, group in groups.items():
+            if name and len(group) > 1:
+                st.html(f'<div class="nav-sec">{html.escape(name)}</div>')
+            elif name:
+                st.html('<div class="nav-gap"></div>')
+            for pg in group:
+                st.page_link(pg, label=pg.title, icon=pg.icon, width="stretch")
+
+
+current_page = st.navigation(sections, position="hidden")
+render_nav(sections, nav_slot)
 current_page.run()
 
 
