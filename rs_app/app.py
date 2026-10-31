@@ -386,22 +386,32 @@ def page_home():
 
 
 # ---- Điều hướng ở thanh bên trái ----
-pages = [
-    st.Page(page_home, title="Trang chủ", icon="🏠", url_path="trangchu", default=True),
-    st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs"),
-    st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
-    st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
-    st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
-    st.Page(page_watch, title="Theo dõi", icon="⭐", url_path="theodoi"),
-    st.Page(page_paper, title="Giao dịch giả lập", icon="🎮", url_path="giaodich"),
-    st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
-    st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
-    st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
-]
+_P = {
+    "trangchu": st.Page(page_home, title="Trang chủ", icon="🏠", url_path="trangchu", default=True),
+    "rs": st.Page(page_rs, title="Xếp hạng RS", icon="🏆", url_path="rs"),
+    "dongtien": st.Page(page_flow, title="Dòng tiền", icon="📊", url_path="dongtien"),
+    "klgd": st.Page(page_vol, title="Lọc KLGD", icon="📉", url_path="klgd"),
+    "vimo": st.Page(page_macro, title="Vĩ mô", icon="🌐", url_path="vimo"),
+    "lich": st.Page(page_calendar, title="Lịch kinh tế", icon="📅", url_path="lich"),
+    "tintuc": st.Page(page_news, title="Tin tức", icon="📰", url_path="tintuc"),
+    "bctc": st.Page(page_fin, title="BCTC", icon="📑", url_path="bctc"),
+    "theodoi": st.Page(page_watch, title="Theo dõi", icon="⭐", url_path="theodoi"),
+    "giaodich": st.Page(page_paper, title="Giao dịch giả lập", icon="🎮", url_path="giaodich"),
+}
+# Menu bên trái chia thành các mục lớn; mỗi mục chứa các trang con. Khoá "" = trang đứng riêng, không có tiêu đề mục.
+# Đổi tên/sắp xếp mục ở đây (url_path của từng trang giữ nguyên nên link cũ không hỏng).
+sections = {
+    "": [_P["trangchu"]],
+    "Phân tích kỹ thuật": [_P["rs"], _P["dongtien"], _P["klgd"]],
+    "Phân tích vĩ mô": [_P["vimo"], _P["lich"]],
+    "Tin tức & BCTC": [_P["tintuc"], _P["bctc"]],
+    "Theo dõi": [_P["theodoi"]],
+    "Giao dịch giả lập": [_P["giaodich"]],
+}
 if is_admin:
-    pages.append(st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin"))
-PAGE_BY_PATH = {p.url_path: p for p in pages}
-current_page = st.navigation(pages, position="sidebar")
+    sections["Quản trị"] = [st.Page(page_admin, title="Quản trị", icon="👑", url_path="admin")]
+PAGE_BY_PATH = {p.url_path: p for group in sections.values() for p in group}
+current_page = st.navigation(sections, position="sidebar")
 current_page.run()
 
 
