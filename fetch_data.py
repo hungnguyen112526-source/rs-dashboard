@@ -17,6 +17,7 @@ Biến môi trường:
   TV_BARS         số nến ngày gần nhất lấy từ TradingView khi chạy thường (mặc định 150)
   TV_USERNAME / TV_PASSWORD   (tuỳ chọn) đăng nhập TradingView thay vì ẩn danh
   VNSTOCK_API_KEY             chỉ cần khi phải dùng vnstock
+  VN_RPM          số request/phút tối đa gửi vnstock (mặc định 55, gói cộng đồng giới hạn 60)
   HISTORY_START   ngày bắt đầu lịch sử khi lấy từ vnstock (mặc định 2015-01-01)
 
 Đầu ra: gia_lich_su_rs.csv (như cũ), price_source_log.json (mỗi mã lấy từ nguồn nào), tv_exchange_map.json.
@@ -28,7 +29,7 @@ import time
 
 import pandas as pd
 
-from price_sources import PriceFetcher, SourceError, load_history, load_json, save_json
+from price_sources import PriceFetcher, RateLimiter, SourceError, load_history, load_json, save_json
 
 API_KEY = os.environ.get("VNSTOCK_API_KEY")
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
@@ -41,6 +42,7 @@ MIN_SESSIONS_REQUIRED = 120          # công thức RS cần tối thiểu 120 p
 PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "auto").strip().lower()
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes")
 TV_BARS = int(os.environ.get("TV_BARS", "150") or 150)
+VN_RPM = float(os.environ.get("VN_RPM", "55") or 55)   # số request/phút tối đa gửi vnstock (giới hạn gói cộng đồng: 60)
 WARN_FRESH_RATIO = 0.90              # < 90% số mã lấy được thì cảnh báo trên GitHub Actions
 
 
@@ -103,8 +105,7 @@ def fetch_all(fetcher, tickers, label=""):
             vn_errors_streak = 0
         elif res.source == "tv":
             time.sleep(fetcher.tv_sleep)
-        else:
-            time.sleep(5)
+        # vnstock: không sleep cố định nữa - RateLimiter trong PriceFetcher tự giãn cách theo VN_RPM
     return frames, errors
 
 
@@ -127,6 +128,7 @@ def main():
         tv_factory=make_tv, vn_factory=make_vnstock,
         exchange_map=load_json(EXCHANGE_MAP_FILE, {}) or {},
         tv_bars=TV_BARS, full_refresh=FULL_REFRESH,
+        vn_limiter=RateLimiter(VN_RPM),
     )
 
     # --- Vòng chính + thử lại 1 lần cho mã lỗi ---
