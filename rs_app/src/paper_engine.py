@@ -18,6 +18,7 @@ SETTLE_SESSIONS = 2             # T+2: mua phiên T, bán được từ phiên T
 DEFAULT_START_CASH = 1_000_000_000
 MIN_START_CASH = 1_000_000            # vốn ban đầu tự nhập: từ 1 triệu
 MAX_START_CASH = 1_000_000_000_000    # đến 1.000 tỷ
+PRICE_BAND = 0.07                # biên độ trần/sàn giả định chung (chưa có cột sàn HOSE/HNX/UPCOM)
 MAX_TRADES = 3000               # chặn để dữ liệu mỗi người không vượt giới hạn 1MB/lệnh của Redis REST
 
 
@@ -156,17 +157,144 @@ def sessions_from(vnindex: pd.DataFrame, stocks: pd.DataFrame | None = None) -> 
 
 
 # ----------------------------------------------------------------------------- bảng & tổng hợp
-def portfolio_table(trades: list[dict], quotes: pd.DataFrame, sessions: list[str]) -> pd.DataFrame:
+def first_buy_date(trades: list[dict], ticker: str) -> str | None:
+    for t in trades:
+        if t["ticker"] == ticker.upper() and t["side"] == "BUY":
+            return t["date"]
+    return None
+
+
+def settle_date(date_str: str, sessions: list[str], settle: int = SETTLE_SESSIONS) -> tuple[str, bool]:
+    """(ngày bán được, có phải ước tính?). Ngày tương lai ước tính bằng cách bỏ thứ 7, CN (chưa biết ngày lễ)."""
+    if not sessions:
+        return date_str, True
+    last = len(sessions) - 1
+    j = _session_index(sessions, date_str) + settle
+    if j <= last:
+        return sessions[j], False
+    d = pd.Timestamp(sessions[-1])
+    extra = j - last
+    while extra > 0:
+        d += pd.Timedelta(days=1)
+        if d.weekday() < 5:
+            extra -= 1
+    return f"{d:%Y-%m-%d}", True
+
+
+def _last_price(quotes: pd.DataFrame, tk: str, fallback: float) -> float:
+    if tk in quotes.index and pd.notna(quotes.at[tk, "close"]):
+        return to_vnd(quotes.at[tk, "close"])
+    return fallback
+
+
+def portfolio_table(trades: list[dict], quotes: pd.DataFrame, sessions: list[str],
+                    ind_map: dict | None = None, rs_map: dict | None = None) -> pd.DataFrame:
     pos, _ = positions(trades)
+    ind_map, rs_map = ind_map or {}, rs_map or {}
+    total_value = sum(p["qty"] * _last_price(quotes, tk, p["avg_cost"]) for tk, p in pos.items())
+    last_buy = {}
+    for t in trades:
+        if t["side"] == "BUY":
+            last_buy[t["ticker"]] = t["date"]
     rows = []
     for tk, p in sorted(pos.items()):
-        last = to_vnd(quotes.at[tk, "close"]) if tk in quotes.index and pd.notna(quotes.at[tk, "close"]) else p["avg_cost"]
+        last = _last_price(quotes, tk, p["avg_cost"])
         value = p["qty"] * last
         pnl = value - p["cost"]
-        rows.append({"Mã": tk, "Số lượng": p["qty"], "Bán được": sellable_qty(trades, tk, sessions),
-                     "Giá vốn TB": p["avg_cost"], "Giá hiện tại": last, "Giá trị": value,
-                     "Lãi/lỗ": pnl, "% lãi/lỗ": pnl / p["cost"] * 100 if p["cost"] else 0.0})
-    return pd.DataFrame(rows, columns=["Mã", "Số lượng", "Bán được", "Giá vốn TB", "Giá hiện tại", "Giá trị", "Lãi/lỗ", "% lãi/lỗ"])
+        can_sell = sellable_qty(trades, tk, sessions)
+        chg = None
+        if tk in quotes.index and pd.notna(quotes.at[tk, "prev_close"]) and quotes.at[tk, "prev_close"]:
+            chg = (quotes.at[tk, "close"] / quotes.at[tk, "prev_close"] - 1) * 100
+        if can_sell >= p["qty"]:
+            free_from = "Bán được hết"
+        else:
+            d, est = settle_date(last_buy[tk], sessions)
+            free_from = ("~" if est else "") + f"{pd.Timestamp(d):%d/%m}"
+        first = first_buy_date(trades, tk)
+        held_days = (pd.Timestamp(sessions[-1] if sessions else first) - pd.Timestamp(first)).days if first else 0
+        rows.append({"Mã": tk, "Ngành": ind_map.get(tk, ""), "RS": rs_map.get(tk),
+                     "Số lượng": p["qty"], "Bán được": can_sell, "Giá vốn TB": p["avg_cost"], "Giá hiện tại": last,
+                     "% hôm nay": chg, "Giá trị": value, "Tỷ trọng %": value / total_value * 100 if total_value else 0.0,
+                     "Lãi/lỗ": pnl, "% lãi/lỗ": pnl / p["cost"] * 100 if p["cost"] else 0.0,
+                     "Bán hết từ": free_from, "Mua đầu": first, "Nắm giữ (ngày)": held_days})
+    cols = ["Mã", "Ngành", "RS", "Số lượng", "Bán được", "Giá vốn TB", "Giá hiện tại", "% hôm nay", "Giá trị",
+            "Tỷ trọng %", "Lãi/lỗ", "% lãi/lỗ", "Bán hết từ", "Mua đầu", "Nắm giữ (ngày)"]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def day_pnl(trades: list[dict], quotes: pd.DataFrame, last_date: str) -> float:
+    """Lãi/lỗ trong phiên mới nhất = số cổ phiếu đang nắm TỪ CUỐI PHIÊN TRƯỚC x (đóng cửa - đóng cửa phiên trước)."""
+    pos, _ = positions([t for t in trades if t["date"] < last_date])
+    total = 0.0
+    for tk, p in pos.items():
+        if tk in quotes.index and pd.notna(quotes.at[tk, "prev_close"]) and pd.notna(quotes.at[tk, "close"]):
+            total += p["qty"] * (quotes.at[tk, "close"] - quotes.at[tk, "prev_close"]) * PRICE_UNIT
+    return total
+
+
+def realized_by_sell(trades: list[dict]) -> dict[int, float]:
+    """{id lệnh bán: lãi/lỗ đã chốt sau phí và thuế, theo giá vốn bình quân}."""
+    pos: dict[str, dict] = {}
+    out: dict[int, float] = {}
+    for t in trades:
+        p = pos.setdefault(t["ticker"], {"qty": 0, "cost": 0.0})
+        value = t["qty"] * t["price"]
+        if t["side"] == "BUY":
+            p["qty"] += t["qty"]
+            p["cost"] += value + t["fee"]
+        else:
+            basis = (p["cost"] / p["qty"] if p["qty"] else 0.0) * t["qty"]
+            out[t["id"]] = (value - t["fee"] - t["tax"]) - basis
+            p["qty"] -= t["qty"]
+            p["cost"] -= basis
+            if p["qty"] <= 0:
+                p["qty"], p["cost"] = 0, 0.0
+    return out
+
+
+def trade_stats(trades: list[dict]) -> dict:
+    pnl = list(realized_by_sell(trades).values())
+    wins = [x for x in pnl if x > 0]
+    losses = [x for x in pnl if x < 0]
+    return {"n_buy": sum(t["side"] == "BUY" for t in trades), "n_sell": len(pnl),
+            "win_rate": len(wins) / len(pnl) * 100 if pnl else None,
+            "avg_win": sum(wins) / len(wins) if wins else None,
+            "avg_loss": sum(losses) / len(losses) if losses else None,
+            "profit_factor": (sum(wins) / -sum(losses)) if losses and wins else None,
+            "fees": float(sum(t["fee"] for t in trades)), "taxes": float(sum(t["tax"] for t in trades))}
+
+
+def max_drawdown(curve: pd.Series) -> float | None:
+    """Mức sụt giảm lớn nhất từ đỉnh (số âm, %)."""
+    if curve is None or curve.empty:
+        return None
+    return float((curve / curve.cummax() - 1).min() * 100)
+
+
+def _tick(price: float) -> int:
+    return 10 if price < 10_000 else (50 if price < 50_000 else 100)
+
+
+def price_limits(ref_k: float, band: float = PRICE_BAND) -> tuple[float, float]:
+    """(trần, sàn) bằng đồng từ giá tham chiếu (nghìn đồng), làm tròn theo bước giá HOSE."""
+    ref = to_vnd(ref_k)
+    tick = _tick(ref)
+    ceil = int(ref * (1 + band) // tick * tick)
+    floor = -int(-(ref * (1 - band)) // tick * tick)
+    return float(ceil), float(floor)
+
+
+def stock_info(one: pd.DataFrame) -> dict:
+    """Thông tin phiên mới nhất của 1 mã từ bảng giá (cột date, open, high, low, close, volume). Giá: nghìn đồng."""
+    d = one.sort_values("date").tail(260)
+    if d.empty:
+        return {}
+    last = d.iloc[-1]
+    prev = d.iloc[-2]["close"] if len(d) > 1 else None
+    avg20 = d["volume"].tail(21).iloc[:-1].mean() if len(d) > 1 else None
+    return {"date": last["date"], "open": last["open"], "high": last["high"], "low": last["low"], "close": last["close"],
+            "prev_close": prev, "volume": last["volume"], "avg_vol20": avg20,
+            "hi52": d["high"].max(), "lo52": d["low"].min()}
 
 
 def account_summary(start_cash: float, trades: list[dict], quotes: pd.DataFrame) -> dict:
@@ -178,6 +306,7 @@ def account_summary(start_cash: float, trades: list[dict], quotes: pd.DataFrame)
         market += p["qty"] * last
     equity = cash + market
     return {"cash": cash, "market_value": market, "equity": equity, "pnl": equity - start_cash,
+            "stock_pct": market / equity * 100 if equity else 0.0, "cash_pct": cash / equity * 100 if equity else 0.0,
             "pnl_pct": (equity / start_cash - 1) * 100 if start_cash else 0.0,
             "realized": realized, "unrealized": market - sum(p["cost"] for p in pos.values())}
 

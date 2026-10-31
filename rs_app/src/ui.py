@@ -92,12 +92,9 @@ h1 { line-height: 1.15 !important; }
   content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
   background: linear-gradient(180deg, #6A57F2, #2fa8ff);
 }
-/* Menu mục lục tự vẽ (key="side_nav" ở app.py): tiêu đề mục nhỏ, trang con thụt nhẹ, trang đang mở có thanh nhấn tím */
-.st-key-side_nav { gap: 2px !important; margin: .5rem 0 .4rem; }
+/* Menu mục lục tự vẽ (key="side_nav" ở app.py): mục lớn thu gọn được, trang con thụt vào có đường kẻ dọc */
+.st-key-side_nav { gap: 4px !important; margin: .5rem 0 .4rem; }
 .st-key-side_nav [data-testid="stElementContainer"] { margin: 0; }
-.nav-sec { font-size: .68rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .5;
-  padding: .95rem .85rem .2rem; }
-.nav-gap { height: .45rem; border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent); margin: 0 .6rem .35rem; }
 .st-key-side_nav [data-testid="stPageLink-NavLink"] {
   position: relative; border-radius: 14px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
   transition: background-color .15s ease, transform .15s ease;
@@ -108,6 +105,14 @@ h1 { line-height: 1.15 !important; }
   content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
   background: linear-gradient(180deg, #6A57F2, #2fa8ff);
 }
+/* mục lớn: trang đứng riêng + tiêu đề khối thu gọn cùng kiểu chữ đậm */
+.st-key-side_nav [class*="st-key-nav_top_"] [data-testid="stPageLink-NavLink"] { font-weight: 800; }
+.st-key-side_nav [data-testid="stExpander"] details { border: 0 !important; background: transparent !important; }
+.st-key-side_nav [data-testid="stExpander"] summary { padding: .45rem .8rem; min-height: 40px; border-radius: 14px; font-weight: 800; }
+.st-key-side_nav [data-testid="stExpander"] summary:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
+.st-key-side_nav [data-testid="stExpanderDetails"] { gap: 2px; padding: 0 0 .25rem .35rem; margin-left: 1.2rem;
+  border-left: 2px solid color-mix(in srgb, currentColor 13%, transparent); }
+.st-key-side_nav [data-testid="stExpanderDetails"] [data-testid="stPageLink-NavLink"] { font-weight: 600; font-size: .93rem; min-height: 36px; }
 /* Thẻ người dùng + chân thanh bên (key="side_user", "side_foot" ở app.py) */
 .st-key-side_user { border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 18px; padding: .7rem .75rem .6rem;
   background: color-mix(in srgb, currentColor 4%, transparent); }
