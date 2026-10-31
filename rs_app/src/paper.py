@@ -1,4 +1,4 @@
-"""Trang Giao dịch thử (paper trading): đặt lệnh giả lập, danh mục, lịch sử, hiệu suất. Logic ở paper_engine.py."""
+"""Trang Giao dịch giả lập (paper trading): đặt lệnh giả lập, danh mục, lịch sử, hiệu suất. Logic ở paper_engine.py."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -21,7 +21,7 @@ def _midsession(date_str: str, now: datetime) -> bool:
 
 
 def render(stocks: pd.DataFrame, vnindex: pd.DataFrame, username: str, scores: pd.DataFrame, quotes: pd.DataFrame) -> None:
-    st.header("🎮 Giao dịch thử")
+    st.header("🎮 Giao dịch giả lập")
     st.caption("Tài khoản giả lập, không dùng tiền thật. Lệnh khớp ngay theo giá đóng cửa của phiên mới nhất trong dữ liệu.")
     if not paper_store.auth.redis_enabled():
         st.warning("Chưa bật Redis (Upstash): dữ liệu được lưu file cục bộ và có thể mất khi máy chủ khởi động lại.")
@@ -72,7 +72,7 @@ def render(stocks: pd.DataFrame, vnindex: pd.DataFrame, username: str, scores: p
 
 
 def _render_create(username: str, today: str) -> None:
-    st.info("Bạn chưa có tài khoản giao dịch thử. Chọn số vốn ban đầu để bắt đầu.")
+    st.info("Bạn chưa có tài khoản giao dịch giả lập. Chọn số vốn ban đầu để bắt đầu.")
     cash = st.selectbox("Vốn ban đầu", pe.START_CASH_OPTIONS, index=pe.START_CASH_OPTIONS.index(pe.DEFAULT_START_CASH),
                         format_func=_vnd, key="pt_new_cash")
     st.caption(f"Quy tắc: lô {pe.LOT} cổ phiếu · phí {pe.FEE_RATE:.2%} mỗi chiều · thuế bán {pe.SELL_TAX_RATE:.2%} · "
