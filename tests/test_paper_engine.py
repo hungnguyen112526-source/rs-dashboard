@@ -149,3 +149,11 @@ def test_sessions_from_prefers_vnindex():
     vn = pd.DataFrame({"date": pd.to_datetime(SESSIONS)})
     assert pe.sessions_from(vn) == SESSIONS
     assert pe.sessions_from(pd.DataFrame({"date": []}), _stocks())[0] == "2026-10-26"
+
+
+def test_custom_start_cash_validation():
+    assert pe.validate_start_cash(250_000_000)[0]
+    assert pe.validate_start_cash(pe.MIN_START_CASH)[0] and pe.validate_start_cash(pe.MAX_START_CASH)[0]
+    assert not pe.validate_start_cash(pe.MIN_START_CASH - 1)[0]
+    assert not pe.validate_start_cash(pe.MAX_START_CASH + 1)[0]
+    assert not pe.validate_start_cash("abc")[0] and not pe.validate_start_cash(None)[0]
