@@ -92,6 +92,22 @@ h1 { line-height: 1.15 !important; }
   content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
   background: linear-gradient(180deg, #6A57F2, #2fa8ff);
 }
+/* Menu mục lục tự vẽ (key="side_nav" ở app.py): tiêu đề mục nhỏ, trang con thụt nhẹ, trang đang mở có thanh nhấn tím */
+.st-key-side_nav { gap: 2px !important; margin: .5rem 0 .4rem; }
+.st-key-side_nav [data-testid="stElementContainer"] { margin: 0; }
+.nav-sec { font-size: .68rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .5;
+  padding: .95rem .85rem .2rem; }
+.nav-gap { height: .45rem; border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent); margin: 0 .6rem .35rem; }
+.st-key-side_nav [data-testid="stPageLink-NavLink"] {
+  position: relative; border-radius: 14px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
+  transition: background-color .15s ease, transform .15s ease;
+}
+.st-key-side_nav [data-testid="stPageLink-NavLink"]:hover:not([aria-current="page"]) { background: color-mix(in srgb, currentColor 7%, transparent); transform: translateX(2px); }
+.st-key-side_nav [data-testid="stPageLink-NavLink"][aria-current="page"] { background: rgba(123,97,255,.16); font-weight: 800; }
+.st-key-side_nav [data-testid="stPageLink-NavLink"][aria-current="page"]::before {
+  content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, #6A57F2, #2fa8ff);
+}
 /* Thẻ người dùng + chân thanh bên (key="side_user", "side_foot" ở app.py) */
 .st-key-side_user { border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 18px; padding: .7rem .75rem .6rem;
   background: color-mix(in srgb, currentColor 4%, transparent); }
@@ -135,7 +151,7 @@ h1 { line-height: 1.15 !important; }
   [data-testid="stMain"] [data-testid="stHorizontalBlock"]:has([class*="st-key-card_kpi"]) > [data-testid="stColumn"] {
       min-width: calc(50% - .5rem) !important; flex: 1 1 calc(50% - .5rem) !important; }
   [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-primary"] { min-height: 44px; }
-  [data-testid="stSidebarNavLink"] { padding: .5rem .8rem; min-height: 44px; }
+  [data-testid="stSidebarNavLink"], .st-key-side_nav [data-testid="stPageLink-NavLink"] { padding: .5rem .8rem; min-height: 44px; }
   [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
   [data-testid="stMetricLabel"] p { font-size: .78rem; }
   [class*="st-key-card"] { border-radius: 18px; }
