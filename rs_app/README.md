@@ -2,7 +2,7 @@
 
 Bản Streamlit của RS Dashboard. Đợt 1 gồm: cổng đăng ký/đăng nhập, trang **Xếp hạng RS** (ngày/tuần),
 trang **Lọc KLGD giảm dần**, và trang **Quản trị người dùng** (chỉ admin).
-Bản trang tĩnh cũ (GitHub Pages) vẫn giữ nguyên làm dự phòng.
+(Bản trang tĩnh HTML/GitHub Pages cũ đã được gỡ bỏ.)
 
 ## Đặt vào repo
 Chép thư mục `rs_app/` vào repo `rs-dashboard` (cạnh `gia_lich_su_rs.csv`). App tự tìm file dữ liệu trong
@@ -33,7 +33,7 @@ streamlit run app.py
 
 ## Lưu ý quan trọng về quyền riêng tư dữ liệu
 Đăng nhập chỉ chặn việc vào ứng dụng. Nếu repo GitHub để **public**, ai cũng đọc được `gia_lich_su_rs.csv`.
-Muốn dữ liệu thật sự riêng tư phải để repo **private** — nhưng GitHub Pages (bản dự phòng) cần gói trả phí cho repo private.
+Muốn dữ liệu thật sự riêng tư phải để repo **private** (nay không còn GitHub Pages nên không bị ràng buộc gói trả phí).
 
 ## Trợ lý AI (khung chat nổi, Gemini miễn phí)
 Sau khi đăng nhập, góc dưới bên phải có nút **💬 Hỏi AI**. Bấm để mở khung chat, bấm **✕** để thu gọn (↔️ đổi cỡ, 🗑️ xoá cuộc trò chuyện, ⚙️ nhập API key riêng).
