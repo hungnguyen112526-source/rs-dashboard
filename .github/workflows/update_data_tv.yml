@@ -18,7 +18,7 @@ on:
         type: boolean
         default: false
 
-# tránh 2 lần chạy cùng ghi vào CSV/docs cùng lúc (dùng chung nhóm với update_data.yml)
+# tránh 2 lần chạy cùng ghi vào CSV cùng lúc (dùng chung nhóm với update_data.yml)
 concurrency:
   group: data-update
   cancel-in-progress: false
@@ -48,14 +48,11 @@ jobs:
           FULL_REFRESH: ${{ (github.event.schedule == '0 1 * * 0' || inputs.full_refresh == true) && '1' || '' }}
         run: python fetch_data.py
 
-      - name: Sinh báo cáo HTML tĩnh
-        run: python generate_report.py
-
-      - name: Commit và push file dữ liệu + báo cáo mới
+      - name: Commit và push file dữ liệu giá
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gia_lich_su_rs.csv docs/
+          git add gia_lich_su_rs.csv
           for f in price_source_log.json tv_exchange_map.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done

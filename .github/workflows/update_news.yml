@@ -34,15 +34,11 @@ jobs:
         run: python fetch_news.py
         continue-on-error: true  # 1 nguồn lỗi không nên làm hỏng cả workflow
 
-      - name: Sinh lại báo cáo HTML tĩnh
-        run: python generate_report.py
-
-      - name: Commit và push tin tức + trang news
+      - name: Commit và push tin tức
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add docs/
           if [ -f news_data.json ]; then
             git add news_data.json
           fi
@@ -61,7 +57,7 @@ jobs:
             fi
             echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
             sleep $((i * 15))
-            # Lưu ý: khi rebase, "theirs" = commit của workflow này -> ưu tiên bản HTML/JSON vừa sinh
+            # Lưu ý: khi rebase, "theirs" = commit của workflow này -> ưu tiên bản JSON vừa sinh
             git fetch origin main
             git rebase -X theirs origin/main || { git rebase --abort; }
           done

@@ -2,7 +2,7 @@ name: Cập nhật vĩ mô + lãi suất trái phiếu
 
 # Chạy riêng khỏi workflow giá. Cùng nhịp với trước đây (T2-T6 ~6 lần/ngày + 05:15 hằng ngày), lệch ~15 phút so với các lần chạy giá.
 # Không gọi vnstock (fetch_macro.py dùng FRED/World Bank..., fetch_bond_yields.py dùng TradingView) nên không ăn vào hạn mức 60 request/phút.
-# Vẫn dùng nhóm "data-update" để không sinh/push docs/ chồng với workflow giá (tránh HTML bị ghi đè bằng dữ liệu giá cũ).
+# Chỉ ghi macro_data.json + bond_yields.json (khác file với workflow giá) nên có nhóm concurrency riêng, không phải xếp hàng sau các lần lấy giá.
 
 on:
   schedule:
@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: data-update
+  group: update-macro
   cancel-in-progress: false
 
 jobs:
@@ -54,14 +54,10 @@ jobs:
         run: python fetch_bond_yields.py
         continue-on-error: true  # tvdatafeed là thư viện không chính thức
 
-      - name: Sinh báo cáo HTML tĩnh
-        run: python generate_report.py
-
-      - name: Commit và push vĩ mô + trái phiếu + báo cáo
+      - name: Commit và push vĩ mô + trái phiếu
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/
           for f in macro_data.json bond_yields.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
@@ -80,9 +76,8 @@ jobs:
             fi
             echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
             sleep $((i * 15))
-            # khi rebase, "theirs" = commit của workflow này -> ưu tiên bản HTML/JSON vừa sinh
             git fetch origin main
-            git rebase -X theirs origin/main || { git rebase --abort; }
+            git rebase origin/main || { git rebase --abort; }
           done
 
           echo "::error::Push thất bại sau 5 lần thử."

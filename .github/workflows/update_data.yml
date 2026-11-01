@@ -4,9 +4,8 @@ name: Cập nhật giá RS (vnstock - 6 lần/ngày T2-T6, chỉ phần đuôi)
 # - Lấy toàn bộ lịch sử từ vnstock (15 lần/ngày, cả cuối tuần): update_data_full.yml
 # - Vĩ mô + lãi suất trái phiếu: update_macro.yml
 # - Giá bằng TradingView: update_data_tv.yml (Chủ nhật + thứ Hai)
-# Tất cả cùng ghi gia_lich_su_rs.csv / docs/ nên dùng chung nhóm concurrency "data-update" (chạy lần lượt, không chồng nhau;
+# Các workflow giá cùng ghi gia_lich_su_rs.csv nên dùng chung nhóm concurrency "data-update" (chạy lần lượt, không chồng nhau;
 # cũng đảm bảo không có 2 lần gọi vnstock song song làm vượt hạn mức 60 request/phút).
-# Tên file giữ nguyên update_data.yml vì nút "Cập nhật ngay" trong báo cáo (generate_report.py) trỏ vào file này.
 
 on:
   schedule:
@@ -30,7 +29,7 @@ on:
         type: boolean
         default: false
 
-# tránh 2 lần chạy cùng ghi vào CSV/docs cùng lúc
+# tránh 2 lần chạy cùng ghi vào CSV cùng lúc
 concurrency:
   group: data-update
   cancel-in-progress: false
@@ -62,16 +61,11 @@ jobs:
           VN_CALLS_PER_FETCH: "2"
         run: python fetch_data.py
 
-      - name: Sinh báo cáo HTML tĩnh
-        run: python generate_report.py
-        # BCTC: xem update_financials.yml. Vĩ mô + trái phiếu: xem update_macro.yml.
-        # generate_report.py vẫn đọc các file JSON đã có sẵn trong repo.
-
       - name: Commit và push file dữ liệu + báo cáo mới
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gia_lich_su_rs.csv docs/
+          git add gia_lich_su_rs.csv
           for f in price_source_log.json tv_exchange_map.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
@@ -81,7 +75,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Cập nhật dữ liệu RS tự động $(date +'%Y-%m-%d')"
+          git commit -m "Cập nhật giá RS tự động $(date +'%Y-%m-%d')"
 
           # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
           # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại
