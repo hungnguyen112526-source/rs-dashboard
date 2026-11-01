@@ -1,0 +1,108 @@
+name: Cập nhật giá RS (vnstock - FULL lịch sử, 15 lần/ngày, cả cuối tuần)
+
+# Chạy riêng khỏi update_data.yml: mỗi lần lấy lại TOÀN BỘ lịch sử từ vnstock (FULL_REFRESH=1) để tự chữa các lần điều chỉnh giá.
+# 15 lần/ngày, mọi ngày trong tuần, cách nhau ~90 phút (giờ VN; đã né các mốc 09:30, 11:35, 13:30, 14:35, 15:10, 16:30 của update_data.yml).
+# Dùng chung nhóm concurrency "data-update" nên các lần chạy xếp hàng lần lượt, không bao giờ gọi vnstock song song.
+# Lưu ý: GitHub có thể trễ vài phút so với giờ cron khi hệ thống đông.
+
+on:
+  schedule:
+    # 00:00 VN
+    - cron: "0 17 * * *"
+    # 01:30 VN
+    - cron: "30 18 * * *"
+    # 03:00 VN
+    - cron: "0 20 * * *"
+    # 04:30 VN
+    - cron: "30 21 * * *"
+    # 06:00 VN
+    - cron: "0 23 * * *"
+    # 07:30 VN
+    - cron: "30 0 * * *"
+    # 09:00 VN
+    - cron: "0 2 * * *"
+    # 10:30 VN
+    - cron: "30 3 * * *"
+    # 12:00 VN
+    - cron: "0 5 * * *"
+    # 14:00 VN
+    - cron: "0 7 * * *"
+    # 15:30 VN
+    - cron: "30 8 * * *"
+    # 17:30 VN
+    - cron: "30 10 * * *"
+    # 19:00 VN
+    - cron: "0 12 * * *"
+    # 20:30 VN
+    - cron: "30 13 * * *"
+    # 22:00 VN
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  update-data-vnstock-full:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Lấy lại toàn bộ lịch sử giá cổ phiếu (vnstock)
+        env:
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          PRICE_SOURCE: vnstock
+          FULL_REFRESH: "1"
+          PYTHONUNBUFFERED: "1"
+          VN_RPM: "55"
+          VN_CALLS_PER_FETCH: "2"
+        run: python fetch_data.py
+
+      - name: Sinh báo cáo HTML tĩnh
+        run: python generate_report.py
+
+      - name: Commit và push file dữ liệu + báo cáo mới
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gia_lich_su_rs.csv docs/
+          for f in price_source_log.json tv_exchange_map.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật FULL giá RS tự động $(date +'%Y-%m-%d')"
+
+          # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
+          # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại
+          # vài lần thay vì để cả workflow fail ngay lần đầu. Có rebase lại trước mỗi lần
+          # thử để phòng trường hợp có commit khác đã push lên trong lúc này.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1

@@ -1,0 +1,89 @@
+name: Cập nhật vĩ mô + lãi suất trái phiếu
+
+# Chạy riêng khỏi workflow giá. Cùng nhịp với trước đây (T2-T6 ~6 lần/ngày + 05:15 hằng ngày), lệch ~15 phút so với các lần chạy giá.
+# Không gọi vnstock (fetch_macro.py dùng FRED/World Bank..., fetch_bond_yields.py dùng TradingView) nên không ăn vào hạn mức 60 request/phút.
+# Vẫn dùng nhóm "data-update" để không sinh/push docs/ chồng với workflow giá (tránh HTML bị ghi đè bằng dữ liệu giá cũ).
+
+on:
+  schedule:
+    # 09:45 VN (T2-T6)
+    - cron: "45 2 * * 1-5"
+    # 11:50 VN (T2-T6)
+    - cron: "50 4 * * 1-5"
+    # 13:45 VN (T2-T6)
+    - cron: "45 6 * * 1-5"
+    # 14:50 VN (T2-T6)
+    - cron: "50 7 * * 1-5"
+    # 15:25 VN (T2-T6)
+    - cron: "25 8 * * 1-5"
+    # 16:45 VN (T2-T6)
+    - cron: "45 9 * * 1-5"
+    # 05:15 VN, cả tuần
+    - cron: "15 22 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  update-macro:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Lấy dữ liệu vĩ mô
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: python fetch_macro.py
+        continue-on-error: true  # phần phụ trợ; lỗi tạm thời không nên làm fail cả workflow
+
+      - name: Lấy lãi suất trái phiếu 30 năm toàn cầu (TradingView)
+        run: python fetch_bond_yields.py
+        continue-on-error: true  # tvdatafeed là thư viện không chính thức
+
+      - name: Sinh báo cáo HTML tĩnh
+        run: python generate_report.py
+
+      - name: Commit và push vĩ mô + trái phiếu + báo cáo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          for f in macro_data.json bond_yields.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật vĩ mô + trái phiếu tự động $(date +'%Y-%m-%d %H:%M')"
+
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            # khi rebase, "theirs" = commit của workflow này -> ưu tiên bản HTML/JSON vừa sinh
+            git fetch origin main
+            git rebase -X theirs origin/main || { git rebase --abort; }
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1

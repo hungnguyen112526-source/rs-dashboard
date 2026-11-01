@@ -1,30 +1,32 @@
-name: Cập nhật dữ liệu RS (vnstock - 6 lần/ngày + full 5h sáng)
+name: Cập nhật giá RS (vnstock - 6 lần/ngày T2-T6, chỉ phần đuôi)
 
-# Workflow này lấy giá bằng VNSTOCK. Giá bằng TradingView nằm ở workflow riêng: update_data_tv.yml
-# (Chủ nhật + thứ Hai). Cả hai ghi chung gia_lich_su_rs.csv nên dùng chung nhóm concurrency bên dưới.
+# Workflow này CHỈ lấy giá bằng VNSTOCK (tăng dần, ~45 ngày gần nhất) vào các giờ giao dịch T2-T6.
+# - Lấy toàn bộ lịch sử từ vnstock (15 lần/ngày, cả cuối tuần): update_data_full.yml
+# - Vĩ mô + lãi suất trái phiếu: update_macro.yml
+# - Giá bằng TradingView: update_data_tv.yml (Chủ nhật + thứ Hai)
+# Tất cả cùng ghi gia_lich_su_rs.csv / docs/ nên dùng chung nhóm concurrency "data-update" (chạy lần lượt, không chồng nhau;
+# cũng đảm bảo không có 2 lần gọi vnstock song song làm vượt hạn mức 60 request/phút).
 # Tên file giữ nguyên update_data.yml vì nút "Cập nhật ngay" trong báo cáo (generate_report.py) trỏ vào file này.
 
 on:
   schedule:
     # T2-T6, giờ VN (UTC+7) -> UTC. Lần giữa phiên chỉ có nến chưa chốt, sẽ được ghi đè ở lần chạy sau.
-    # 09:30 VN = 02:30 UTC
+    # 09:30 VN
     - cron: "30 2 * * 1-5"
-    # 11:35 VN = 04:35 UTC
+    # 11:35 VN
     - cron: "35 4 * * 1-5"
-    # 13:30 VN = 06:30 UTC
+    # 13:30 VN
     - cron: "30 6 * * 1-5"
-    # 14:35 VN = 07:35 UTC
+    # 14:35 VN
     - cron: "35 7 * * 1-5"
-    # 15:10 VN = 08:10 UTC
+    # 15:10 VN
     - cron: "10 8 * * 1-5"
-    # 16:30 VN = 09:30 UTC
+    # 16:30 VN
     - cron: "30 9 * * 1-5"
-    # 05:00 VN = 22:00 UTC (hôm trước), CẢ TUẦN: lấy lại TOÀN BỘ lịch sử từ vnstock (FULL_REFRESH) để tự chữa các lần điều chỉnh giá
-    - cron: "0 22 * * *"
   workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
     inputs:
       full_refresh:
-        description: "Lấy lại toàn bộ lịch sử từ vnstock (chậm: ~5 giây/mã)"
+        description: "Lấy lại toàn bộ lịch sử từ vnstock (chậm hơn: ~2 giây/mã)"
         type: boolean
         default: false
 
@@ -54,35 +56,23 @@ jobs:
         env:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           PRICE_SOURCE: vnstock
-          FULL_REFRESH: ${{ (github.event.schedule == '0 22 * * *' || inputs.full_refresh == true) && '1' || '' }}
+          FULL_REFRESH: ${{ inputs.full_refresh == true && '1' || '' }}
+          PYTHONUNBUFFERED: "1"
+          VN_RPM: "55"
+          VN_CALLS_PER_FETCH: "2"
         run: python fetch_data.py
-
-      - name: Chạy script lấy dữ liệu vĩ mô
-        env:
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
-        run: python fetch_macro.py
-        continue-on-error: true  # vĩ mô là phần phụ trợ; nếu FRED/World Bank/vnstock bị lỗi
-                                  # tạm thời thì vẫn không chặn việc cập nhật bảng xếp hạng RS
-
-      - name: Lấy lãi suất trái phiếu 30 năm toàn cầu (TradingView - phần phụ trợ, vẫn chạy ở workflow này)
-        run: python fetch_bond_yields.py
-        continue-on-error: true  # phần phụ trợ; tvdatafeed là thư viện không chính thức,
-                                  # lỗi tạm thời không nên chặn cập nhật bảng xếp hạng RS
 
       - name: Sinh báo cáo HTML tĩnh
         run: python generate_report.py
-        # Lưu ý: BCTC (financials_data.json) KHÔNG được fetch lại ở workflow này nữa —
-        # xem update_financials.yml (chạy riêng, 1 lần/ngày, vì BCTC là dữ liệu theo quý,
-        # không cần lấy lại 3 lần/ngày như giá cổ phiếu). generate_report.py ở đây vẫn đọc
-        # financials_data.json đã có sẵn trong repo (nếu có) để giữ nguyên trang BCTC.
+        # BCTC: xem update_financials.yml. Vĩ mô + trái phiếu: xem update_macro.yml.
+        # generate_report.py vẫn đọc các file JSON đã có sẵn trong repo.
 
       - name: Commit và push file dữ liệu + báo cáo mới
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gia_lich_su_rs.csv macro_data.json docs/
-          for f in bond_yields.json price_source_log.json tv_exchange_map.json; do
+          git add gia_lich_su_rs.csv docs/
+          for f in price_source_log.json tv_exchange_map.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
 
