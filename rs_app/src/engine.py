@@ -1,6 +1,5 @@
 """
-Tính toán RS (khung Ngày/Tuần) và bộ lọc KLGD giảm dần — cùng công thức với bản trang tĩnh
-(generate_report.py) để số liệu khớp nhau.
+Tính toán RS (khung Ngày/Tuần) và bộ lọc KLGD giảm dần (công thức kiểu IBD RS Rating).
 """
 from datetime import datetime, timedelta, timezone
 
@@ -204,7 +203,7 @@ def ohlcv_for(df: pd.DataFrame, ticker: str, frame: str = "day") -> pd.DataFrame
 
 
 # ----------------------------------------------------------------------------
-# Chỉ số dòng tiền (Money-flow Weighted Index) — cùng công thức generate_report.compute_index_series
+# Chỉ số dòng tiền (Money-flow Weighted Index) 
 # ----------------------------------------------------------------------------
 INDEX_SMOOTH_WINDOW = 20
 
