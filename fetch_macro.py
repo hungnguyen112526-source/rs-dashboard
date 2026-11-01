@@ -1,6 +1,6 @@
 """
 Script lấy dữ liệu vĩ mô từ FRED (Mỹ), World Bank (Việt Nam) và yfinance (tỷ giá
-USD/VND + giá vàng thế giới). Lưu kết quả vào macro_data.json để generate_report.py
+USD/VND + giá vàng thế giới). Lưu kết quả vào macro_data.json để app Streamlit (rs_app)
 đọc và hiển thị trên dashboard.
 
 Nguồn:
@@ -299,7 +299,7 @@ def fetch_worldbank():
 # Tỷ giá USD/VND, giá vàng thế giới, giá dầu Brent (qua yfinance)
 # ============================================================
 # Cả 3 chỉ số này lấy đủ OHLC (Open/High/Low/Close) thay vì chỉ giá đóng cửa, để
-# generate_report.py có thể vẽ biểu đồ NẾN (candlestick) thay vì biểu đồ đường —
+# app có thể vẽ biểu đồ NẾN (candlestick) thay vì biểu đồ đường —
 # khác với các cặp tiền tệ lấy từ FRED (DXY, EUR/USD...) chỉ có 1 giá trị/ngày nên
 # vẫn phải vẽ dạng đường như cũ, không có đủ dữ liệu để vẽ nến.
 YFINANCE_SERIES = {
@@ -420,7 +420,7 @@ def fetch_yfinance_retail():
                 "group"      : meta["group"],
                 "description": meta["description"],
                 "freq"       : "daily",
-                "ohlc"       : True,   # đánh dấu để generate_report.py biết vẽ nến thay vì đường
+                "ohlc"       : True,   # đánh dấu để app biết vẽ nến thay vì đường
                 "values"     : values,  # mỗi phần tử: [date, open, high, low, close]
             }
             print(f"  yfinance [{key}]: OK ({len(values)} điểm, {values[0][0]} -> {values[-1][0]})")

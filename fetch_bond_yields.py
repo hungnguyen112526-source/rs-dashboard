@@ -1,6 +1,6 @@
 """
 Lấy lợi suất trái phiếu chính phủ kỳ hạn 2, 10 và 30 năm của nhiều quốc gia từ TradingView qua thư viện
-tvdatafeed (không chính thức, đăng nhập ẩn danh) -> bond_yields.json, để generate_report.py
+tvdatafeed (không chính thức, đăng nhập ẩn danh) -> bond_yields.json, để app Streamlit (rs_app)
 vẽ biểu đồ so sánh trên trang Vĩ mô.
 
 Lấy dữ liệu theo TUẦN (800 tuần ~ 15 năm) cho nhẹ. Lỗi ở từng quốc gia không làm hỏng các
@@ -20,7 +20,7 @@ VN_TZ = timezone(timedelta(hours=7))
 COUNTRIES = [("US", "TVC", "Mỹ"), ("JP", "TVC", "Nhật"), ("GB", "TVC", "Anh"), ("DE", "TVC", "Đức"),
              ("FR", "TVC", "Pháp"), ("KR", "TVC", "Hàn Quốc"), ("AU", "TVC", "Úc"), ("NL", "TVC", "Hà Lan"),
              ("CN", "TVC", "Trung Quốc")]
-# khoá trong JSON -> kỳ hạn. "series" (30 năm) giữ nguyên tên để generate_report.py (trang tĩnh) không bị ảnh hưởng.
+# khoá trong JSON -> kỳ hạn. "series" (30 năm) giữ nguyên tên để dữ liệu cũ trong bond_yields.json vẫn đọc được.
 TENORS = {"series": "30", "series_10y": "10", "series_2y": "02"}
 
 

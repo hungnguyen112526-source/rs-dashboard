@@ -1,6 +1,6 @@
 """
 Script tổng hợp tin tức tài chính/chứng khoán từ các nguồn RSS công khai (CafeF, Vietstock,
-Investing.com) -> news_data.json, để generate_report.py render thành trang docs/news.html.
+Investing.com) -> news_data.json, để app Streamlit (rs_app) hiển thị ở trang Tin tức.
 
 Khác với fetch_data.py/fetch_financials.py (cần VNSTOCK_API_KEY), script này CHỈ đọc RSS công
 khai -> không cần API key. Chạy ở workflow riêng (update_news.yml), tần suất dày hơn các

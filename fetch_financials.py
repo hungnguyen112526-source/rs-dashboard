@@ -8,10 +8,9 @@ Script lấy dữ liệu báo cáo tài chính (BCTC) cho toàn bộ mã trong d
 Dùng để chạy tự động (GitHub Actions) — không cần nhập API key tương tác, cùng cơ chế
 với fetch_data.py (VNSTOCK_API_KEY lấy từ biến môi trường / GitHub Secret).
 
-Lưu ý quan trọng: vì đây là trang web tĩnh (không có server chạy API theo yêu cầu),
-toàn bộ dữ liệu BCTC cho TẤT CẢ các mã phải được lấy sẵn ở đây và nhúng vào
-financials_data.json, rồi generate_report.py mới đọc file này để render trang
-docs/financials.html. Số lượng lệnh gọi API vì vậy khá lớn (số mã x 4 loại báo cáo)
+Lưu ý quan trọng: app Streamlit chỉ đọc file dữ liệu có sẵn (không gọi API theo yêu cầu),
+nên toàn bộ dữ liệu BCTC cho TẤT CẢ các mã phải được lấy sẵn ở đây và ghi vào
+financials_data.json (rs_app đọc file này ở trang BCTC). Số lượng lệnh gọi API vì vậy khá lớn (số mã x 4 loại báo cáo)
 -> script có nghỉ giữa các lần gọi để tránh bị giới hạn API, và lỗi ở từng mã/báo cáo
 không làm hỏng toàn bộ kết quả (bỏ qua mã/báo cáo đó, các mã khác vẫn chạy tiếp).
 
