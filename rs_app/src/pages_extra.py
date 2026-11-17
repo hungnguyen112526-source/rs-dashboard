@@ -505,9 +505,133 @@ def _fed_card(macro: dict):
                 st.caption("Nguồn: FOMC Summary of Economic Projections, qua FRED")
 
 
-def render_macro(macro, bonds, vnindex: pd.DataFrame):
+WORLD_COLORS = ["#4cc9f0", "#f72585", "#80ed99", "#ffbe0b", "#9d4edd", "#fb8500", "#2a9d8f", "#e63946",
+                "#4361ee", "#f472b6", "#10b981", "#a78bfa"]
+WORLD_DEFAULT = ["SPX", "NI225", "HSI", "KOSPI", "DAX", "VN"]
+VN_KEY = "VN"
+
+
+def _world_frames(world: dict, vnindex: pd.DataFrame | None) -> dict:
+    """{khoá: (nhãn, khu vực, DataFrame index=date, cột open/high/low/close)}; VN-Index lấy từ dữ liệu giá của dashboard."""
+    out = {}
+    for k, v in (world.get("indices") or {}).items():
+        rows = [r for r in (v.get("data") or []) if len(r) >= 5]
+        if not rows:
+            continue
+        d = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close"])
+        d["date"] = pd.to_datetime(d["date"], errors="coerce")
+        d = d.dropna(subset=["date", "close"]).set_index("date").sort_index()
+        d = d[~d.index.duplicated(keep="last")]
+        if not d.empty:
+            out[k] = (v.get("label", k), v.get("region", "Khác"), d)
+    if vnindex is not None and not vnindex.empty:
+        g = vnindex[vnindex["ticker"] == "VNINDEX"] if "ticker" in vnindex.columns else vnindex
+        cols = [c for c in ["open", "high", "low", "close"] if c in g.columns]
+        if "close" in cols and "date" in g.columns:
+            d = g.assign(date=pd.to_datetime(g["date"])).drop_duplicates("date", keep="last").set_index("date").sort_index()[cols]
+            if not d.empty:
+                out[VN_KEY] = ("VN-Index (Việt Nam)", "Việt Nam", d)
+    return out
+
+
+def _world_perf(c: pd.Series) -> dict:
+    """Biến động % của 1 chuỗi giá đóng cửa theo mốc lịch (1 ngày, 1 tuần, 1 tháng, YTD, 1 năm)."""
+    c = c.dropna()
+    if len(c) < 2:
+        return {}
+    last, d = float(c.iloc[-1]), c.index[-1]
+
+    def chg(base):
+        return (last / float(base) - 1) * 100 if base is not None and float(base) else None
+
+    def back(offset):
+        s = c[c.index <= d - offset]
+        return s.iloc[-1] if len(s) else None
+
+    ytd = c[c.index < pd.Timestamp(d.year, 1, 1)]
+    return {"Giá": last, "1 ngày": chg(c.iloc[-2]), "1 tuần": chg(back(pd.Timedelta(days=7))),
+            "1 tháng": chg(back(pd.DateOffset(months=1))), "YTD": chg(ytd.iloc[-1] if len(ytd) else None),
+            "1 năm": chg(back(pd.DateOffset(years=1))), "Phiên cuối": d.strftime("%d/%m/%Y")}
+
+
+def _pct_color(v):
+    if v is None or pd.isna(v):
+        return ""
+    return f"color: {GREEN}" if v > 0 else (f"color: {RED}" if v < 0 else "")
+
+
+def _world_card(world, vnindex: pd.DataFrame | None = None):
+    with st.container(border=True, key="card_macro_world"):
+        st.subheader("🌍 Chỉ số chứng khoán thế giới")
+        if not (world or {}).get("indices"):
+            _missing("world_indices.json", "Cập nhật vĩ mô + lãi suất trái phiếu (update_macro)")
+            return
+        frames = _world_frames(world, vnindex)
+        if not frames:
+            st.info("Chưa có dữ liệu chỉ số.")
+            return
+        st.caption(f"Nguồn: TradingView · nến ngày · Cập nhật lần cuối: {world.get('updated_at', '–')} · "
+                   "Mỗi thị trường đóng cửa vào giờ khác nhau nên cột 'Phiên cuối' có thể lệch ngày.")
+
+        regions = ["Tất cả"] + list(dict.fromkeys(r for _, r, _ in frames.values()))
+        region = st.segmented_control("Khu vực", regions, default="Tất cả", key="macro_world_region") or "Tất cả"
+        shown = {k: v for k, v in frames.items() if region == "Tất cả" or v[1] == region}
+
+        rows = []
+        for k, (label, reg, d) in shown.items():
+            rows.append({"Chỉ số": label, "Khu vực": reg, **_world_perf(d["close"])})
+        tbl = pd.DataFrame(rows)
+        pct_cols = ["1 ngày", "1 tuần", "1 tháng", "YTD", "1 năm"]
+        for c in pct_cols + ["Giá"]:
+            if c not in tbl.columns:
+                tbl[c] = None
+        tbl = tbl[["Chỉ số", "Khu vực", "Giá"] + pct_cols + ["Phiên cuối"]]
+        sty = tbl.style.format({"Giá": "{:,.2f}", **{c: "{:+.2f}%" for c in pct_cols}}, na_rep="–")
+        sty = (sty.map if hasattr(sty, "map") else sty.applymap)(_pct_color, subset=pct_cols)
+        st.dataframe(sty, hide_index=True, width="stretch", height=min(40 + 35 * len(tbl), 720))
+
+        c1, c2 = st.columns([2, 3], vertical_alignment="bottom")
+        mode = c1.segmented_control("Dạng xem", ["So sánh (mốc 100)", "Nến 1 chỉ số"],
+                                    default="So sánh (mốc 100)", key="macro_world_mode") or "So sánh (mốc 100)"
+        rng = c2.segmented_control("Khoảng", ["1N", "3N", "5N", "10N", "Tất cả"], default="1N",
+                                   key="macro_world_rng") or "1N"
+        names = {k: v[0] for k, v in frames.items()}
+        if mode == "So sánh (mốc 100)":
+            default = [k for k in WORLD_DEFAULT if k in frames] or list(frames)[:4]
+            picked = st.multiselect("Chỉ số", list(names), default=default, format_func=names.get,
+                                    key="macro_world_pick")
+            clipped = {k: _clip_years(frames[k][2][["close"]], rng)["close"] for k in picked}
+            clipped = {k: s for k, s in clipped.items() if not s.empty}
+            if not clipped:
+                st.info("Chọn ít nhất một chỉ số.")
+                return
+            start = max(s.index[0] for s in clipped.values())   # mốc 100 chung: ngày bắt đầu muộn nhất
+            lines = []
+            for n, (k, s) in enumerate(clipped.items()):
+                s = s[s.index >= start]
+                if s.empty:
+                    continue
+                lines.append(ui.tv_line(s / float(s.iloc[0]) * 100, WORLD_COLORS[n % len(WORLD_COLORS)], names[k], 1.8))
+            ui.tv_chart(f"So sánh hiệu suất (mốc 100 tại {start.strftime('%d/%m/%Y')})",
+                        [{"weight": 1, "series": lines}], height=460)
+        else:
+            c3, c4 = st.columns([3, 2], vertical_alignment="bottom")
+            key = c3.selectbox("Chỉ số", list(names), format_func=names.get, key="macro_world_one")
+            frame = c4.segmented_control("Khung", ["Ngày", "Tuần"], default="Ngày", key="macro_world_frame") or "Ngày"
+            d = frames[key][2]
+            if frame == "Tuần":
+                d = d.resample("W-FRI").agg({"open": "first", "high": "max", "low": "min", "close": "last"}).dropna(subset=["close"])
+            d = _clip_years(d, rng)
+            if not {"open", "high", "low"} <= set(d.columns):
+                ui.tv_chart(names[key], [{"weight": 1, "series": [ui.tv_line(d["close"], BLUE, names[key], 2)]}], height=460)
+            else:
+                ui.tv_chart(f"{names[key]} — {frame}", [{"weight": 1, "series": [ui.tv_candles(d)]}], height=460)
+
+
+def render_macro(macro, bonds, vnindex: pd.DataFrame, world=None):
     st.header("🌐 Dữ liệu vĩ mô")
     _bond_card(bonds)
+    _world_card(world, vnindex)
     _vnindex_card(vnindex)
     if macro and macro.get("series"):
         _indicator_card(macro)
