@@ -351,7 +351,8 @@ def page_fin():
 
 def page_macro():
     pages_extra.render_macro(pages_extra.load_json("macro_data.json"),
-                             pages_extra.load_json("bond_yields.json"), vnindex)
+                             pages_extra.load_json("bond_yields.json"), vnindex,
+                             pages_extra.load_json("world_indices.json"))
 
 
 def page_calendar():
