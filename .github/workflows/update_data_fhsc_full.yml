@@ -1,6 +1,6 @@
-name: Cập nhật giá RS (fhsc - TOÀN BỘ lịch sử, 1 lần/tuần)
+name: Cập nhật giá RS (fhsc - TOÀN BỘ lịch sử, 2 lần/tuần)
 
-# Mỗi tuần 1 lần lấy lại TOÀN BỘ lịch sử giá từ vnstock thế hệ 6, nguồn fhsc, cho mọi mã + VNINDEX
+# Mỗi tuần 2 lần (thứ Tư, thứ Bảy) lấy lại TOÀN BỘ lịch sử giá từ vnstock thế hệ 6, nguồn fhsc, cho mọi mã + VNINDEX
 # (PRICE_SOURCE=vnstock + FULL_REFRESH=1: không dùng TradingView; bắt đầu từ HISTORY_START).
 # Phiên trùng ngày/mã với dữ liệu hiện có thì lấy bản fhsc (merge_with_existing giữ dòng mới nhất); phiên cũ mà
 # fhsc không còn trả về vẫn được giữ nguyên, lịch sử chỉ dài thêm, không bị cắt.
@@ -9,14 +9,9 @@ name: Cập nhật giá RS (fhsc - TOÀN BỘ lịch sử, 1 lần/tuần)
 
 on:
   schedule:
-    # Thứ Bảy 08:00 giờ VN (UTC+7) = 01:00 UTC. GitHub có thể trễ vài phút so với giờ cron.
-    - cron: "0 1 * * 6"
-  workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
-    inputs:
-      history_start:
-        description: "Ngày bắt đầu lịch sử (YYYY-MM-DD)"
-        type: string
-        default: "2015-01-01"
+    # Thứ Tư và thứ Bảy, 08:00 giờ VN (UTC+7) = 01:00 UTC. GitHub có thể trễ vài phút so với giờ cron.
+    - cron: "0 1 * * 3,6"
+  workflow_dispatch: {}  # bấm chạy tay từ tab Actions, không hỏi gì thêm
 
 concurrency:
   group: data-update
@@ -56,7 +51,7 @@ jobs:
         env:
           PRICE_SOURCE: vnstock
           FULL_REFRESH: "1"
-          HISTORY_START: ${{ inputs.history_start || '2015-01-01' }}
+          HISTORY_START: "2010-01-01"   # muốn lấy xa hơn thì đổi ngày này (lưu ý giới hạn 100 MB/file của GitHub)
           VNSTOCK_SOURCE: fhsc
           FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
           PYTHONUNBUFFERED: "1"
