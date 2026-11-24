@@ -1,0 +1,98 @@
+name: Cập nhật giá RS (fhsc - TOÀN BỘ lịch sử, 1 lần/tuần)
+
+# Mỗi tuần 1 lần lấy lại TOÀN BỘ lịch sử giá từ vnstock thế hệ 6, nguồn fhsc, cho mọi mã + VNINDEX
+# (PRICE_SOURCE=vnstock + FULL_REFRESH=1: không dùng TradingView; bắt đầu từ HISTORY_START).
+# Phiên trùng ngày/mã với dữ liệu hiện có thì lấy bản fhsc (merge_with_existing giữ dòng mới nhất); phiên cũ mà
+# fhsc không còn trả về vẫn được giữ nguyên, lịch sử chỉ dài thêm, không bị cắt.
+# Cần Secret FHSC_API_KEY (khoá FHSC hết hạn sau 30 ngày: phải tạo lại và cập nhật Secret định kỳ).
+# Dùng chung nhóm concurrency "data-update" với các workflow giá khác (cùng ghi gia_lich_su_rs.csv) nên chạy lần lượt.
+
+on:
+  schedule:
+    # Thứ Bảy 08:00 giờ VN (UTC+7) = 01:00 UTC. GitHub có thể trễ vài phút so với giờ cron.
+    - cron: "0 1 * * 6"
+  workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
+    inputs:
+      history_start:
+        description: "Ngày bắt đầu lịch sử (YYYY-MM-DD)"
+        type: string
+        default: "2015-01-01"
+
+concurrency:
+  group: data-update
+  cancel-in-progress: false
+
+jobs:
+  update-data-fhsc-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài thư viện
+        run: pip install -r requirements.txt
+
+      - name: Cài vnstock thế hệ 6
+        run: pip install -r requirements-vnstock6.txt
+
+      - name: Kiểm tra khoá FHSC
+        env:
+          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
+        run: |
+          if [ -z "$FHSC_API_KEY" ]; then
+            echo "::error::Chưa có Secret FHSC_API_KEY (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Lấy lại toàn bộ lịch sử giá cổ phiếu (vnstock 6 - fhsc)
+        env:
+          PRICE_SOURCE: vnstock
+          FULL_REFRESH: "1"
+          HISTORY_START: ${{ inputs.history_start || '2015-01-01' }}
+          VNSTOCK_SOURCE: fhsc
+          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
+          PYTHONUNBUFFERED: "1"
+          VN_RPM: "30"
+        run: python fetch_data.py
+
+      - name: Commit và push file dữ liệu + báo cáo mới
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gia_lich_su_rs.csv
+          for f in price_source_log.json tv_exchange_map.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "Không có gì thay đổi, bỏ qua commit/push."
+            exit 0
+          fi
+
+          git commit -m "Cập nhật TOÀN BỘ lịch sử giá RS (fhsc) tự động $(date +'%Y-%m-%d %H:%M')"
+
+          # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
+          # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại
+          # vài lần thay vì để cả workflow fail ngay lần đầu. Có rebase lại trước mỗi lần
+          # thử để phòng trường hợp có commit khác đã push lên trong lúc này.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push thành công (lần thử $i)."
+              exit 0
+            fi
+            echo "Push thất bại (lần thử $i/5), thử lại sau $((i * 15))s..."
+            sleep $((i * 15))
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "::error::Push thất bại sau 5 lần thử."
+          exit 1
