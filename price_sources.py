@@ -29,6 +29,8 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
+from vnstock_adapter import is_rate_limited
+
 STD_COLS = ["date", "open", "high", "low", "close", "volume", "ticker"]
 TV_EXCHANGES = ["HOSE", "HNX", "UPCOM"]
 INDEX_SYMBOLS = {"VNINDEX": "HOSE", "VN30": "HOSE", "HNXINDEX": "HNX"}
@@ -51,7 +53,7 @@ REJECTED_PREFIXES = ("chưa có lịch sử", "dữ liệu TradingView không kh
 
 VN_RL_RETRIES = 3        # số lần thử lại 1 mã khi vnstock báo vượt hạn mức
 VN_RL_WAIT = 30          # giây chờ trước khi thử lại (vnstock thường báo chờ ~23 giây)
-VN_RL_HINTS = ("rate limit", "hạn mức", "ha n muc", "429", "too many requests")
+# (cách nhận diện lỗi vượt hạn mức nằm trong vnstock_adapter.is_rate_limited)
 
 
 class SourceError(Exception):
@@ -216,17 +218,23 @@ def vnstock_frame(df: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
     df = df.rename(columns={c: str(c).lower() for c in df.columns})
     date_col = "time" if "time" in df.columns else "date"
     keep = [c for c in (date_col, "open", "high", "low", "close", "volume") if c in df.columns]
-    out = df[keep].rename(columns={date_col: "date"})
+    out = df[keep].rename(columns={date_col: "date"}).copy()
+    # vnstock 6 trả mốc giờ có múi giờ (nến ngày = 07:00+07:00): bỏ múi giờ, giữ nguyên giờ địa phương
+    # (đúng định dạng đang lưu trong CSV). Thứ tự dòng có thể đảo giữa các nguồn/hồ sơ -> luôn xếp tăng dần.
+    out["date"] = pd.to_datetime(out["date"])
+    if getattr(out["date"].dt, "tz", None) is not None:
+        out["date"] = out["date"].dt.tz_localize(None)
+    if "volume" in out.columns:
+        out["volume"] = pd.to_numeric(out["volume"], errors="coerce")  # Int64 (v6) -> số thường, không ném lỗi
+    out = out.drop_duplicates(subset="date", keep="last").sort_values("date").reset_index(drop=True)
     out["ticker"] = ticker
     return out
 
 
 def vnstock_ohlcv(obj, start: str, count_fallback: int = 1300):
     end = pd.Timestamp.today().strftime("%Y-%m-%d")
-    try:
-        return obj.ohlcv(start=start, end=end, interval="1D")
-    except TypeError:
-        return obj.ohlcv(count=count_fallback, interval="1D")
+    # vnstock 6 kiểm tra chặt tham số: tham số không hỗ trợ báo VNSTOCK_INPUT_PARAM ngay (không còn lối `count=` cũ).
+    return obj.ohlcv(start=start, end=end, interval="1D")
 
 
 # ----------------------------------------------------------------------------
@@ -337,20 +345,17 @@ class PriceFetcher:
         return str(max(pd.Timestamp(self.history_start), old.index.max() - pd.Timedelta(days=45)).date())
 
     def _vn_request(self, ticker: str, is_index: bool):
-        """Gọi vnstock cho 1 mã, có giãn cách + tự chờ/thử lại khi vượt hạn mức.
-        Lưu ý: khi hết hạn mức, thư viện vnstock có thể tự gọi sys.exit() (SystemExit - KHÔNG phải Exception) làm cả script
-        chết giữa chừng, nên phải bắt riêng SystemExit."""
+        """Gọi vnstock cho 1 mã, có giãn cách + tự chờ/thử lại khi nguồn báo vượt hạn mức.
+        Lỗi khác (nguồn không hỗ trợ, sai tham số, chưa cấu hình nguồn...) được ném lên ngay, không thử lại."""
         for attempt in range(VN_RL_RETRIES + 1):
             if self.vn_limiter:
                 self.vn_limiter.acquire(self.vn_calls_per_fetch)
             try:
                 market = self._get_vn()
-                obj = market.index(symbol=ticker) if is_index else market.equity(symbol=ticker)
+                obj = market.index(ticker) if is_index else market.equity(ticker)
                 return vnstock_ohlcv(obj, self._vn_start(ticker))
-            except SystemExit:
-                pass
             except Exception as e:  # noqa: BLE001
-                if not any(h in str(e).lower() for h in VN_RL_HINTS):
+                if not is_rate_limited(e):
                     raise
             if attempt == VN_RL_RETRIES:
                 raise SourceError("vnstock vượt hạn mức")

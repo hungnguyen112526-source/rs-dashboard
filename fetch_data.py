@@ -7,7 +7,7 @@ Nguồn dữ liệu (xem price_sources.py):
     vào CSV hiện có, sau khi đối chiếu khớp với lịch sử đang có).
   - FULL_REFRESH=1: cũng dùng TradingView nhưng xin tối đa 5000 nến ngày (toàn bộ lịch sử) và ghi toàn bộ số nến đó
     (vẫn phải qua bước đối chiếu 20 phiên gần nhất) để "tự chữa" các lần điều chỉnh giá.
-  - Dự phòng: vnstock (cần VNSTOCK_API_KEY) cho mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử
+  - Dự phòng: vnstock thế hệ 6 (cần VNSTOCK_SOURCE + khoá nguồn) cho mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử
     (các mã này lấy toàn bộ lịch sử từ HISTORY_START khi FULL_REFRESH=1).
 
 Biến môi trường:
@@ -16,9 +16,10 @@ Biến môi trường:
                   Muốn lấy toàn bộ bằng vnstock như trước: PRICE_SOURCE=vnstock + FULL_REFRESH=1
   TV_BARS         số nến ngày gần nhất lấy từ TradingView khi chạy thường (mặc định 150)
   TV_USERNAME / TV_PASSWORD   (tuỳ chọn) đăng nhập TradingView thay vì ẩn danh
-  VNSTOCK_API_KEY             chỉ cần khi phải dùng vnstock
-  VN_RPM          số request/phút tối đa gửi vnstock (mặc định 55, gói cộng đồng giới hạn 60)
-  VN_CALLS_PER_FETCH  số request vnstock thực tế tốn cho 1 mã (mặc định 2; hạ về 1 nếu log cho thấy không bị vượt hạn mức)
+  VNSTOCK_SOURCE  nguồn Open API của vnstock thế hệ 6 (vd tcbs | ssi | dnse | fhsc); BẮT BUỘC khi dùng vnstock, không có mặc định
+                  (khoá nguồn do bạn tự đặt: `vnstock keys set <nguồn>` trên máy, hoặc <NGUỒN>_API_KEY trong GitHub Secrets)
+  VN_RPM          số request/phút tối đa gửi nguồn (mặc định 30 - hãy chỉnh theo hạn mức thực tế của nguồn bạn chọn)
+  VN_CALLS_PER_FETCH  số request thực tế tốn cho 1 mã (mặc định 1)
   HISTORY_START   ngày bắt đầu lịch sử khi lấy từ vnstock (mặc định 2015-01-01)
 
 Đầu ra: gia_lich_su_rs.csv (như cũ), price_source_log.json (mỗi mã lấy từ nguồn nào), tv_exchange_map.json.
@@ -31,8 +32,8 @@ import time
 import pandas as pd
 
 from price_sources import PriceFetcher, RateLimiter, SourceError, load_history, load_json, save_json
+from vnstock_adapter import SourceNotConfigured, make_market
 
-API_KEY = os.environ.get("VNSTOCK_API_KEY")
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
 OUTPUT_FILE = "gia_lich_su_rs.csv"
 SOURCE_LOG_FILE = "price_source_log.json"
@@ -43,8 +44,8 @@ MIN_SESSIONS_REQUIRED = 120          # công thức RS cần tối thiểu 120 p
 PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "auto").strip().lower()
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes")
 TV_BARS = int(os.environ.get("TV_BARS", "150") or 150)
-VN_RPM = float(os.environ.get("VN_RPM", "55") or 55)   # số request/phút tối đa gửi vnstock (giới hạn gói cộng đồng: 60)
-VN_CALLS_PER_FETCH = int(os.environ.get("VN_CALLS_PER_FETCH", "2") or 2)   # số request vnstock thực tế tốn cho 1 mã
+VN_RPM = float(os.environ.get("VN_RPM", "30") or 30)   # số request/phút tối đa gửi nguồn (tuỳ nguồn; chỉnh theo hạn mức của nguồn bạn chọn)
+VN_CALLS_PER_FETCH = int(os.environ.get("VN_CALLS_PER_FETCH", "1") or 1)   # số request thực tế tốn cho 1 mã
 WARN_FRESH_RATIO = 0.90              # < 90% số mã lấy được thì cảnh báo trên GitHub Actions
 
 
@@ -76,12 +77,11 @@ def make_tv():
 
 
 def make_vnstock():
-    if not API_KEY:
-        raise SourceError("thiếu VNSTOCK_API_KEY")
-    import vnai
-    from vnstock import Market
-    vnai.setup_api_key(API_KEY)
-    return Market()
+    """vnstock thế hệ 6: Market(<nguồn>). Nguồn lấy từ VNSTOCK_SOURCE (xem vnstock_adapter.py)."""
+    try:
+        return make_market()
+    except SourceNotConfigured as e:
+        raise SourceError(str(e)) from e
 
 
 def fetch_all(fetcher, tickers, label=""):
