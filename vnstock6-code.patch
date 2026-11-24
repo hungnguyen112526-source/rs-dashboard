@@ -1,0 +1,788 @@
+diff -ruN -x __pycache__ -x .pytest_cache base/.github/workflows/update_data.yml gen6/.github/workflows/update_data.yml
+--- base/.github/workflows/update_data.yml	2026-11-24 05:34:16.435853217 +0000
++++ gen6/.github/workflows/update_data.yml	2026-11-24 06:16:56.704575039 +0000
+@@ -1,8 +1,8 @@
+-name: Cập nhật giá RS (TradingView tạm thời - 6 lần/ngày T2-T6, chỉ phần đuôi)
++name: Cập nhật giá RS (TradingView + fhsc dự phòng - 6 lần/ngày T2-T6, chỉ phần đuôi)
+ 
+-# TẠM THỜI: vnstock dòng cũ đã ngừng xác thực (10/11/2026) nên workflow này lấy giá bằng TRADINGVIEW (tvdatafeed,
+-# PRICE_SOURCE=tv) vào các giờ giao dịch T2-T6. Chế độ tv: mã nào lỗi/không khớp thì GIỮ dữ liệu cũ; mã mới chưa có
+-# lịch sử sẽ không được thêm. Khi có nguồn dữ liệu mới, đổi lại PRICE_SOURCE và thêm khoá nguồn vào GitHub Secrets.
++# Giá lấy bằng TRADINGVIEW (tvdatafeed) là chính; mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử,
++# thì dùng vnstock thế hệ 6 với nguồn fhsc (PRICE_SOURCE=auto). Cần Secret FHSC_API_KEY (khoá FHSC hết hạn sau 30 ngày,
++# phải tạo lại và cập nhật Secret định kỳ). Thiếu khoá/không cài được vnstock 6 -> chỉ mất phần dự phòng.
+ # - Lấy toàn bộ lịch sử (15 lần/ngày, cả cuối tuần): update_data_full.yml
+ # - Vĩ mô + lãi suất trái phiếu: update_macro.yml
+ # - Giá bằng TradingView: update_data_tv.yml (Chủ nhật + thứ Hai)
+@@ -27,7 +27,7 @@
+   workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
+     inputs:
+       full_refresh:
+-        description: "Lấy lại toàn bộ lịch sử từ TradingView (tối đa 5000 nến, chậm hơn)"
++        description: "Lấy lại toàn bộ lịch sử (TradingView tối đa 5000 nến, mã lỗi chuyển sang fhsc; chậm hơn)"
+         type: boolean
+         default: false
+ 
+@@ -53,13 +53,20 @@
+       - name: Cài thư viện
+         run: pip install -r requirements.txt
+ 
++      - name: Cài vnstock thế hệ 6 (nguồn dự phòng fhsc)
++        # Nếu không cài được thì chỉ cảnh báo: workflow vẫn chạy bằng TradingView, chỉ mất phần dự phòng.
++        run: pip install -r requirements-vnstock6.txt || echo "::warning::Không cài được vnstock 6; chạy chỉ với TradingView"
++
+       - name: Chạy script lấy dữ liệu giá cổ phiếu (TradingView)
+         env:
+           TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
+           TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+-          PRICE_SOURCE: tv
++          PRICE_SOURCE: auto
++          VNSTOCK_SOURCE: fhsc
++          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
+           FULL_REFRESH: ${{ inputs.full_refresh == true && '1' || '' }}
+           PYTHONUNBUFFERED: "1"
++          VN_RPM: "30"
+         run: python fetch_data.py
+ 
+       - name: Commit và push file dữ liệu + báo cáo mới
+diff -ruN -x __pycache__ -x .pytest_cache base/.github/workflows/update_data_full.yml gen6/.github/workflows/update_data_full.yml
+--- base/.github/workflows/update_data_full.yml	2026-11-24 05:34:16.435933205 +0000
++++ gen6/.github/workflows/update_data_full.yml	2026-11-24 06:16:56.704793541 +0000
+@@ -1,6 +1,6 @@
+-name: Cập nhật giá RS (TradingView tạm thời - FULL lịch sử, 15 lần/ngày, cả cuối tuần)
++name: Cập nhật giá RS (TradingView + fhsc dự phòng - FULL lịch sử, 15 lần/ngày, cả cuối tuần)
+ 
+-# TẠM THỜI: đang dùng TradingView (PRICE_SOURCE=tv, tối đa 5000 nến/mã) vì vnstock dòng cũ đã ngừng xác thực (10/11/2026).
++# TradingView là nguồn chính (tối đa 5000 nến/mã); mã lỗi/không khớp/mới chuyển sang vnstock 6 nguồn fhsc (PRICE_SOURCE=auto, Secret FHSC_API_KEY).
+ # Chạy riêng khỏi update_data.yml: mỗi lần lấy lại TOÀN BỘ lịch sử (FULL_REFRESH=1) để tự chữa các lần điều chỉnh giá.
+ # Lưu ý: 15 lần/ngày x ~205 mã có thể bị TradingView giới hạn; nếu thấy lỗi thì giảm số lần chạy ở phần cron bên dưới.
+ # 15 lần/ngày, mọi ngày trong tuần, cách nhau ~90 phút (giờ VN; đã né các mốc 09:30, 11:35, 13:30, 14:35, 15:10, 16:30 của update_data.yml).
+@@ -62,13 +62,20 @@
+       - name: Cài thư viện
+         run: pip install -r requirements.txt
+ 
++      - name: Cài vnstock thế hệ 6 (nguồn dự phòng fhsc)
++        # Nếu không cài được thì chỉ cảnh báo: workflow vẫn chạy bằng TradingView, chỉ mất phần dự phòng.
++        run: pip install -r requirements-vnstock6.txt || echo "::warning::Không cài được vnstock 6; chạy chỉ với TradingView"
++
+       - name: Lấy lại toàn bộ lịch sử giá cổ phiếu (TradingView)
+         env:
+           TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
+           TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+-          PRICE_SOURCE: tv
++          PRICE_SOURCE: auto
++          VNSTOCK_SOURCE: fhsc
++          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
+           FULL_REFRESH: "1"
+           PYTHONUNBUFFERED: "1"
++          VN_RPM: "30"
+         run: python fetch_data.py
+ 
+       - name: Commit và push file dữ liệu + báo cáo mới
+diff -ruN -x __pycache__ -x .pytest_cache base/.github/workflows/update_financials.yml gen6/.github/workflows/update_financials.yml
+--- base/.github/workflows/update_financials.yml	2026-11-24 05:34:16.436054088 +0000
++++ gen6/.github/workflows/update_financials.yml	2026-11-24 06:16:56.705038917 +0000
+@@ -4,9 +4,10 @@
+ # thay đổi trong ngày — nên không cần lấy lại nhiều lần/ngày như giá cổ phiếu. Chạy workflow
+ # này 1 lần/ngày là đủ, giúp giảm đáng kể tổng thời gian chạy Actions mỗi ngày.
+ 
+-# TẠM THỜI TẮT LỊCH CHẠY: fetch_financials.py dùng vnstock dòng cũ (đã ngừng xác thực 10/11/2026) và
+-# tvdatafeed không có báo cáo tài chính. financials_data.json giữ nguyên dữ liệu cũ. Khi có nguồn BCTC mới,
+-# cập nhật fetch_financials.py rồi bật lại lịch dưới đây:
++# Lấy BCTC bằng vnstock thế hệ 6, nguồn fhsc (Secret FHSC_API_KEY; khoá FHSC hết hạn sau 30 ngày).
++# LỊCH CHẠY ĐANG TẮT: hãy bấm chạy tay (Run workflow) lần đầu, so sánh financials_data.json mới với bản cũ
++# (máy chưa đăng nhập gói Vnstock chỉ nhận chỉ tiêu cấp 1 -> số dòng có thể ít hơn, và bảng ratio không còn),
++# rồi mới bật lịch bằng cách bỏ dấu # các dòng dưới đây:
+ #   schedule:
+ #     # 8:00 sáng giờ VN (UTC+7) = 01:00 UTC -> chạy T2-T6. Chạy trước lần chạy giá đầu
+ #     # tiên trong ngày (09:30 giờ VN) để tránh 2 workflow cùng commit/push 1 lúc.
+@@ -31,9 +32,15 @@
+       - name: Cài thư viện
+         run: pip install -r requirements.txt
+ 
++      - name: Cài vnstock thế hệ 6
++        run: pip install -r requirements-vnstock6.txt
++
+       - name: Chạy script lấy báo cáo tài chính
+         env:
+-          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
++          VNSTOCK_SOURCE: fhsc
++          FIN_SOURCE: fhsc
++          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
++          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}   # tuỳ chọn: khoá tài khoản Vnstock (mở chỉ tiêu BCTC đầy đủ)
+         run: python fetch_financials.py
+         continue-on-error: true  # BCTC là phần phụ trợ; lỗi/timeout ở bước này không nên
+                                   # làm cả workflow fail (vd. nguồn dữ liệu tạm gián đoạn)
+diff -ruN -x __pycache__ -x .pytest_cache base/.gitignore gen6/.gitignore
+--- base/.gitignore	2026-11-24 05:34:16.436178405 +0000
++++ gen6/.gitignore	2026-11-24 06:17:06.247050936 +0000
+@@ -216,3 +216,5 @@
+ 
+ # Streamlit
+ .streamlit/secrets.toml
++
++financials_data.sample.json
+diff -ruN -x __pycache__ -x .pytest_cache base/README.md gen6/README.md
+--- base/README.md	2026-11-24 05:34:16.436248145 +0000
++++ gen6/README.md	2026-11-24 06:17:06.247050936 +0000
+@@ -14,3 +14,21 @@
+ 
+ App đọc trực tiếp các file `gia_lich_su_rs.csv`, `macro_data.json`, `financials_data.json`, `news_data.json`, ... trong repo.
+ Xem `rs_app/README.md` để cấu hình và chạy app.
++
++## Dùng vnstock thế hệ 6 (Open API) - chạy thủ công
++Các workflow hiện chạy bằng TradingView. Phần vnstock 6 (`fetch_data.py` với `PRICE_SOURCE=vnstock|auto`, `fetch_financials.py`) chạy trên máy bạn:
++1. `python -m pip install -r requirements-vnstock6.txt` (nên dùng môi trường ảo riêng).
++2. Tự đăng ký khoá ở nguồn rồi `vnstock keys set <nguồn>`; nếu có gói quyền sử dụng thì `vnstock login`. Không dán khoá vào code hay chat.
++3. Khai báo nguồn **một chỗ** bằng biến môi trường, không có mặc định: PowerShell `$env:VNSTOCK_SOURCE="<nguồn>"` (đổi nguồn sau này chỉ cần đổi biến này; BCTC có thể dùng `FIN_SOURCE` riêng).
++4. Kiểm tra nguồn có hỗ trợ chức năng cần dùng: `vnstock doctor`, `vnstock tools --source <nguồn>`.
++5. Chạy: `python fetch_data.py` (giá) và `python fetch_financials.py` (BCTC). Lưu ý: theo tài liệu 6.0.1, nến giá có ở `dnse`, `fhsc`, `ssi`, `tcbs`; báo cáo tài chính hiện chỉ có ở `fhsc`. Nguồn có Smart OTP (như tcbs) không chạy tự động được trên GitHub Actions.
++Bảng `ratio` không còn lấy từ vnstock ở đây (xem phần đầu `fetch_financials.py`).
++
++### Cấu hình nguồn fhsc (Finhay Securities)
++- **Local (PowerShell):** `vnstock keys set fhsc` (nhập khoá tại đó, không gõ trong lệnh/chat) rồi `$env:VNSTOCK_SOURCE="fhsc"`.
++  Thử nhanh một mã: `python -c "from vnstock import Market; print(Market('fhsc').equity('FPT').ohlcv(start='2026-11-01').tail())"`.
++  Thử BCTC an toàn (ghi `financials_data.sample.json`, không đụng file chính): `$env:FIN_LIMIT="3"; python fetch_financials.py`.
++- **GitHub Actions:** Settings → Secrets and variables → Actions → New repository secret, tên `FHSC_API_KEY` (chỉ cần API Key; theo tài liệu vnstock-oapi, fhsc không dùng Secret Key).
++  Khoá FHSC **hết hạn sau 30 ngày kể từ ngày tạo**: nhớ tạo lại và cập nhật Secret trước hạn.
++- `update_data.yml` / `update_data_full.yml`: TradingView là chính, mã lỗi hoặc mã mới chuyển sang fhsc (`PRICE_SOURCE=auto`).
++- `update_financials.yml`: lịch đang tắt; bấm chạy tay lần đầu và so sánh `financials_data.json` trước khi bật lịch.
+diff -ruN -x __pycache__ -x .pytest_cache base/fetch_data.py gen6/fetch_data.py
+--- base/fetch_data.py	2026-11-24 05:34:17.266882099 +0000
++++ gen6/fetch_data.py	2026-11-24 05:36:41.335199236 +0000
+@@ -7,7 +7,7 @@
+     vào CSV hiện có, sau khi đối chiếu khớp với lịch sử đang có).
+   - FULL_REFRESH=1: cũng dùng TradingView nhưng xin tối đa 5000 nến ngày (toàn bộ lịch sử) và ghi toàn bộ số nến đó
+     (vẫn phải qua bước đối chiếu 20 phiên gần nhất) để "tự chữa" các lần điều chỉnh giá.
+-  - Dự phòng: vnstock (cần VNSTOCK_API_KEY) cho mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử
++  - Dự phòng: vnstock thế hệ 6 (cần VNSTOCK_SOURCE + khoá nguồn) cho mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử
+     (các mã này lấy toàn bộ lịch sử từ HISTORY_START khi FULL_REFRESH=1).
+ 
+ Biến môi trường:
+@@ -16,9 +16,10 @@
+                   Muốn lấy toàn bộ bằng vnstock như trước: PRICE_SOURCE=vnstock + FULL_REFRESH=1
+   TV_BARS         số nến ngày gần nhất lấy từ TradingView khi chạy thường (mặc định 150)
+   TV_USERNAME / TV_PASSWORD   (tuỳ chọn) đăng nhập TradingView thay vì ẩn danh
+-  VNSTOCK_API_KEY             chỉ cần khi phải dùng vnstock
+-  VN_RPM          số request/phút tối đa gửi vnstock (mặc định 55, gói cộng đồng giới hạn 60)
+-  VN_CALLS_PER_FETCH  số request vnstock thực tế tốn cho 1 mã (mặc định 2; hạ về 1 nếu log cho thấy không bị vượt hạn mức)
++  VNSTOCK_SOURCE  nguồn Open API của vnstock thế hệ 6 (vd tcbs | ssi | dnse | fhsc); BẮT BUỘC khi dùng vnstock, không có mặc định
++                  (khoá nguồn do bạn tự đặt: `vnstock keys set <nguồn>` trên máy, hoặc <NGUỒN>_API_KEY trong GitHub Secrets)
++  VN_RPM          số request/phút tối đa gửi nguồn (mặc định 30 - hãy chỉnh theo hạn mức thực tế của nguồn bạn chọn)
++  VN_CALLS_PER_FETCH  số request thực tế tốn cho 1 mã (mặc định 1)
+   HISTORY_START   ngày bắt đầu lịch sử khi lấy từ vnstock (mặc định 2015-01-01)
+ 
+ Đầu ra: gia_lich_su_rs.csv (như cũ), price_source_log.json (mỗi mã lấy từ nguồn nào), tv_exchange_map.json.
+@@ -31,8 +32,8 @@
+ import pandas as pd
+ 
+ from price_sources import PriceFetcher, RateLimiter, SourceError, load_history, load_json, save_json
++from vnstock_adapter import SourceNotConfigured, make_market
+ 
+-API_KEY = os.environ.get("VNSTOCK_API_KEY")
+ SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
+ OUTPUT_FILE = "gia_lich_su_rs.csv"
+ SOURCE_LOG_FILE = "price_source_log.json"
+@@ -43,8 +44,8 @@
+ PRICE_SOURCE = os.environ.get("PRICE_SOURCE", "auto").strip().lower()
+ FULL_REFRESH = os.environ.get("FULL_REFRESH", "").strip().lower() in ("1", "true", "yes")
+ TV_BARS = int(os.environ.get("TV_BARS", "150") or 150)
+-VN_RPM = float(os.environ.get("VN_RPM", "55") or 55)   # số request/phút tối đa gửi vnstock (giới hạn gói cộng đồng: 60)
+-VN_CALLS_PER_FETCH = int(os.environ.get("VN_CALLS_PER_FETCH", "2") or 2)   # số request vnstock thực tế tốn cho 1 mã
++VN_RPM = float(os.environ.get("VN_RPM", "30") or 30)   # số request/phút tối đa gửi nguồn (tuỳ nguồn; chỉnh theo hạn mức của nguồn bạn chọn)
++VN_CALLS_PER_FETCH = int(os.environ.get("VN_CALLS_PER_FETCH", "1") or 1)   # số request thực tế tốn cho 1 mã
+ WARN_FRESH_RATIO = 0.90              # < 90% số mã lấy được thì cảnh báo trên GitHub Actions
+ 
+ 
+@@ -76,12 +77,11 @@
+ 
+ 
+ def make_vnstock():
+-    if not API_KEY:
+-        raise SourceError("thiếu VNSTOCK_API_KEY")
+-    import vnai
+-    from vnstock import Market
+-    vnai.setup_api_key(API_KEY)
+-    return Market()
++    """vnstock thế hệ 6: Market(<nguồn>). Nguồn lấy từ VNSTOCK_SOURCE (xem vnstock_adapter.py)."""
++    try:
++        return make_market()
++    except SourceNotConfigured as e:
++        raise SourceError(str(e)) from e
+ 
+ 
+ def fetch_all(fetcher, tickers, label=""):
+diff -ruN -x __pycache__ -x .pytest_cache base/fetch_financials.py gen6/fetch_financials.py
+--- base/fetch_financials.py	2026-11-24 05:34:17.266894888 +0000
++++ gen6/fetch_financials.py	2026-11-24 06:16:56.705527782 +0000
+@@ -3,10 +3,16 @@
+ - Kết quả kinh doanh (income_statement)
+ - Cân đối kế toán (balance_sheet)
+ - Lưu chuyển tiền tệ (cash_flow)
+-- Chỉ số tài chính (ratio)
++(Bảng "ratio" KHÔNG còn lấy ở đây: vnstock 6 chỉ có ratio() ở nguồn fhsc với cấu trúc khác, hoặc tự tính bằng
++ vnstock_quant.fa. Xem FIN_KEEP_OLD_RATIO bên dưới.)
+ 
+-Dùng để chạy tự động (GitHub Actions) — không cần nhập API key tương tác, cùng cơ chế
+-với fetch_data.py (VNSTOCK_API_KEY lấy từ biến môi trường / GitHub Secret).
++VNSTOCK THẾ HỆ 6: nguồn khai báo bằng biến môi trường FIN_SOURCE (hoặc VNSTOCK_SOURCE), không có mặc định.
++Theo tài liệu 6.0.1, báo cáo tài chính (Fundamental) hiện chỉ có ở nguồn `fhsc`; nguồn khác (vd tcbs) sẽ báo
++VNSTOCK_ROUTE_UNSUPPORTED và script dừng sớm với thông báo rõ ràng. Khoá nguồn/khoá tài khoản đặt bằng
++`vnstock keys set <nguồn>` / `vnstock login` trên máy, hoặc <NGUỒN>_API_KEY / VNSTOCK_API_KEY trong GitHub Secrets.
++FIN_LIMIT=N: chỉ lấy N mã đầu và ghi ra financials_data.sample.json (chạy thử, KHÔNG đụng financials_data.json).
++Biến môi trường tuỳ chọn: FIN_KEEP_OLD_RATIO=1 -> giữ nguyên bảng ratio CŨ trong financials_data.json cho các mã
++(số liệu cũ, không cập nhật); mặc định không giữ.
+ 
+ Lưu ý quan trọng: app Streamlit chỉ đọc file dữ liệu có sẵn (không gọi API theo yêu cầu),
+ nên toàn bộ dữ liệu BCTC cho TẤT CẢ các mã phải được lấy sẵn ở đây và ghi vào
+@@ -40,14 +46,14 @@
+ 
+ import numpy as np
+ import pandas as pd
+-import vnai
+-from vnstock import Finance
+ 
+-API_KEY = os.environ.get("VNSTOCK_API_KEY")
++from vnstock_adapter import (
++    FIN_SOURCE_ENV, SOURCE_ENV, SourceNotConfigured, error_code, get_source, is_unsupported, make_fundamental,
++)
++
+ SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
+ OUTPUT_FILE = "financials_data.json"
+ 
+-FIN_SOURCE = "VCI"          # nguồn dữ liệu BCTC (xem vnstocks.com/docs/vnstock/bao-cao-tai-chinh)
+ FIN_PERIOD = "quarter"      # "quarter" hoặc "year" - lấy theo quý để thấy biến động gần nhất
+ MAX_PERIODS = 12            # chỉ giữ lại tối đa 12 kỳ gần nhất mỗi báo cáo (đỡ nặng JSON)
+ 
+@@ -55,8 +61,9 @@
+     "income_statement": "income_statement",
+     "balance_sheet": "balance_sheet",
+     "cash_flow": "cash_flow",
+-    "ratio": "ratio",
+ }
++KEEP_OLD_RATIO = os.environ.get("FIN_KEEP_OLD_RATIO", "").strip().lower() in ("1", "true", "yes")
++MAX_UNSUPPORTED_STREAK = 3   # nguồn không hỗ trợ BCTC: dừng sớm sau ngần này lần lỗi liên tiếp thay vì lặp hết các mã
+ 
+ SLEEP_BETWEEN_REPORTS = 0.6   # nghỉ giữa các lần gọi report trong cùng 1 mã
+ SLEEP_BETWEEN_TICKERS = 1.5   # nghỉ giữa các mã
+@@ -87,6 +94,19 @@
+ META_COLS = ("item", "item_en", "item_id")
+ 
+ 
++def to_legacy_wide(df: pd.DataFrame) -> pd.DataFrame:
++    """Bảng `format="wide"` của vnstock 6 (hồ sơ v5: id, item, order, level, unit, line_code + các cột kỳ)
++    -> cấu trúc đang lưu trong financials_data.json: item_id, item + các cột kỳ ('2026-Q2').
++    Cột phụ (order, level, unit, line_code) bỏ đi vì app không dùng; `item_en` không còn (chỉ có tên tiếng Việt)."""
++    df = df.rename(columns={"id": "item_id", "item_name": "item", "item_id": "item_id"})
++    cols = [c for c in df.columns if c in META_COLS]
++    if "item" not in cols or "item_id" not in cols:
++        raise ValueError(f"bảng BCTC thiếu cột item/item_id (có: {list(df.columns)[:8]})")
++    drop = {"order", "level", "unit", "line_code", "off_balance", "item_order", "item_level", "item_unit"}
++    periods = [c for c in df.columns if c not in META_COLS and c not in drop]
++    return df[["item", "item_id"] + periods].copy()
++
++
+ def trim_wide(df: pd.DataFrame, max_periods: int = MAX_PERIODS) -> pd.DataFrame:
+     """Định dạng vnstock 4.x: MỖI DÒNG là 1 chỉ tiêu (item/item_en/item_id), MỖI CỘT là 1 kỳ
+     (vd '2026-Q2'). Giữ TOÀN BỘ dòng chỉ tiêu, chỉ cắt bớt số cột kỳ: giữ max_periods kỳ mới nhất,
+@@ -133,64 +153,79 @@
+     return {"columns": columns, "rows": rows}
+ 
+ 
+-def fetch_ticker_financials(ticker: str) -> dict:
+-    """Lấy cả 4 loại báo cáo cho 1 mã. Mỗi báo cáo lỗi riêng lẻ bị bỏ qua (không chặn
+-    các báo cáo còn lại của mã đó)."""
++def fetch_ticker_financials(ticker: str, source: str, fundamental) -> tuple:
++    """Lấy 3 loại báo cáo cho 1 mã. Mỗi báo cáo lỗi riêng lẻ bị bỏ qua (không chặn các báo cáo còn lại).
++    Trả (kết quả, số_lần_lỗi_nguồn_không_hỗ_trợ)."""
+     result = {}
+-    try:
+-        finance = Finance(symbol=ticker, source=FIN_SOURCE)
+-    except Exception as e:
+-        print(f"  {ticker}: LỖI khởi tạo Finance - {type(e).__name__}")
+-        return result
+-
++    unsupported = 0
++    equity = fundamental.equity(ticker)
+     for key, method_name in REPORT_METHODS.items():
+         try:
+-            method = getattr(finance, method_name)
+-            df = method(period=FIN_PERIOD)
++            method = getattr(equity, method_name)
++            df = method(period=FIN_PERIOD, format="wide", source=source)
+             if df is not None and not df.empty:
+-                result[key] = df_to_table(df)
++                result[key] = df_to_table(to_legacy_wide(df))
+             else:
+                 print(f"  {ticker}.{key}: không có dữ liệu")
+-        except Exception as e:
+-            print(f"  {ticker}.{key}: LỖI - {type(e).__name__}")
++        except Exception as e:  # noqa: BLE001
++            if is_unsupported(e):
++                unsupported += 1
++            print(f"  {ticker}.{key}: LỖI - {type(e).__name__} {error_code(e)}".rstrip())
+         time.sleep(SLEEP_BETWEEN_REPORTS)
+ 
+-    return result
++    return result, unsupported
+ 
+ 
+ def main():
+-    if not API_KEY:
+-        print("LỖI: Không tìm thấy VNSTOCK_API_KEY trong biến môi trường.")
++    try:
++        source = get_source(FIN_SOURCE_ENV, fallback_env=SOURCE_ENV)
++    except SourceNotConfigured as e:
++        print(f"LỖI: {e}")
+         sys.exit(1)
+ 
+-    vnai.setup_api_key(API_KEY)
++    fundamental = make_fundamental()
++    print(f"Nguồn BCTC: {source}")
+ 
++    output_file = OUTPUT_FILE
++    limit = int(os.environ.get("FIN_LIMIT", "0") or 0)
+     symbols_df = pd.read_csv(SYMBOLS_FILE)
+     symbols_df = symbols_df.rename(columns={"symbol": "ticker"})
+     tickers = symbols_df["ticker"].dropna().unique().tolist()
++    if limit > 0:
++        tickers = tickers[:limit]
++        output_file = "financials_data.sample.json"
++        print(f"FIN_LIMIT={limit}: chạy thử, kết quả ghi vào {output_file}")
+     total = len(tickers)
+     print(f"Tổng số mã cần lấy BCTC: {total}")
+ 
+     tickers_out = {}
+     ok_count = 0
+     consecutive_errors = 0
++    unsupported_streak = 0
+ 
+     for i, t in enumerate(tickers):
+         prefix = f"[{i+1}/{total}]"
+         try:
+-            data = fetch_ticker_financials(t)
+-        except Exception as e:
+-            print(f"{prefix} {t}: LỖI toàn bộ - {type(e).__name__}")
+-            data = {}
++            data, unsupported = fetch_ticker_financials(t, source, fundamental)
++        except Exception as e:  # noqa: BLE001
++            print(f"{prefix} {t}: LỖI toàn bộ - {type(e).__name__} {error_code(e)}".rstrip())
++            data, unsupported = {}, 0
+ 
+         if data:
+             tickers_out[t] = data
+             ok_count += 1
+             consecutive_errors = 0
+-            print(f"{prefix} {t}: OK ({len(data)}/4 báo cáo)")
++            unsupported_streak = 0
++            print(f"{prefix} {t}: OK ({len(data)}/{len(REPORT_METHODS)} báo cáo)")
+         else:
+             consecutive_errors += 1
+             print(f"{prefix} {t}: không lấy được báo cáo nào")
++            unsupported_streak = unsupported_streak + 1 if unsupported else 0
++
++        if unsupported_streak >= MAX_UNSUPPORTED_STREAK:
++            print(f"LỖI: nguồn '{source}' không hỗ trợ báo cáo tài chính (VNSTOCK_ROUTE_UNSUPPORTED). "
++                  "Theo tài liệu vnstock 6.0.1 chỉ nguồn fhsc có Fundamental; đặt FIN_SOURCE=<nguồn khác>. Dừng sớm.")
++            break
+ 
+         if consecutive_errors >= 5:
+             print("   >> Nghi ngờ bị giới hạn API, tạm nghỉ 60 giây...")
+@@ -204,15 +239,28 @@
+         # Không sys.exit(1): BCTC là phần phụ trợ, không nên chặn cả workflow (giống fetch_macro.py)
+         return
+ 
++    if KEEP_OLD_RATIO and os.path.exists(OUTPUT_FILE):    # luôn đọc bản chính, kể cả khi chạy thử
++        try:
++            with open(OUTPUT_FILE, encoding="utf-8") as f:
++                old = json.load(f).get("tickers", {})
++            kept = 0
++            for t, tables in tickers_out.items():
++                if "ratio" in old.get(t, {}):
++                    tables["ratio"] = old[t]["ratio"]   # số liệu CŨ, không cập nhật
++                    kept += 1
++            print(f"FIN_KEEP_OLD_RATIO: giữ bảng ratio CŨ (không cập nhật) cho {kept} mã")
++        except (OSError, ValueError) as e:
++            print(f"CẢNH BÁO: không đọc được {OUTPUT_FILE} để giữ ratio cũ ({type(e).__name__})")
++
+     output = {
+         "updated_at": pd.Timestamp.now(tz="Asia/Ho_Chi_Minh").strftime("%d/%m/%Y %H:%M"),
+         "period": FIN_PERIOD,
+         "tickers": tickers_out,
+     }
+-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
++    with open(output_file, "w", encoding="utf-8") as f:
+         json.dump(output, f, ensure_ascii=False)
+ 
+-    print(f"\nLấy thành công BCTC cho {ok_count}/{total} mã -> đã lưu {OUTPUT_FILE}")
++    print(f"\nLấy thành công BCTC cho {ok_count}/{total} mã -> đã lưu {output_file}")
+ 
+ 
+ if __name__ == "__main__":
+diff -ruN -x __pycache__ -x .pytest_cache base/price_sources.py gen6/price_sources.py
+--- base/price_sources.py	2026-11-24 05:34:17.861096554 +0000
++++ gen6/price_sources.py	2026-11-24 05:34:23.145073428 +0000
+@@ -29,6 +29,8 @@
+ import numpy as np
+ import pandas as pd
+ 
++from vnstock_adapter import is_rate_limited
++
+ STD_COLS = ["date", "open", "high", "low", "close", "volume", "ticker"]
+ TV_EXCHANGES = ["HOSE", "HNX", "UPCOM"]
+ INDEX_SYMBOLS = {"VNINDEX": "HOSE", "VN30": "HOSE", "HNXINDEX": "HNX"}
+@@ -51,7 +53,7 @@
+ 
+ VN_RL_RETRIES = 3        # số lần thử lại 1 mã khi vnstock báo vượt hạn mức
+ VN_RL_WAIT = 30          # giây chờ trước khi thử lại (vnstock thường báo chờ ~23 giây)
+-VN_RL_HINTS = ("rate limit", "hạn mức", "ha n muc", "429", "too many requests")
++# (cách nhận diện lỗi vượt hạn mức nằm trong vnstock_adapter.is_rate_limited)
+ 
+ 
+ class SourceError(Exception):
+@@ -216,17 +218,23 @@
+     df = df.rename(columns={c: str(c).lower() for c in df.columns})
+     date_col = "time" if "time" in df.columns else "date"
+     keep = [c for c in (date_col, "open", "high", "low", "close", "volume") if c in df.columns]
+-    out = df[keep].rename(columns={date_col: "date"})
++    out = df[keep].rename(columns={date_col: "date"}).copy()
++    # vnstock 6 trả mốc giờ có múi giờ (nến ngày = 07:00+07:00): bỏ múi giờ, giữ nguyên giờ địa phương
++    # (đúng định dạng đang lưu trong CSV). Thứ tự dòng có thể đảo giữa các nguồn/hồ sơ -> luôn xếp tăng dần.
++    out["date"] = pd.to_datetime(out["date"])
++    if getattr(out["date"].dt, "tz", None) is not None:
++        out["date"] = out["date"].dt.tz_localize(None)
++    if "volume" in out.columns:
++        out["volume"] = pd.to_numeric(out["volume"], errors="coerce")  # Int64 (v6) -> số thường, không ném lỗi
++    out = out.drop_duplicates(subset="date", keep="last").sort_values("date").reset_index(drop=True)
+     out["ticker"] = ticker
+     return out
+ 
+ 
+ def vnstock_ohlcv(obj, start: str, count_fallback: int = 1300):
+     end = pd.Timestamp.today().strftime("%Y-%m-%d")
+-    try:
+-        return obj.ohlcv(start=start, end=end, interval="1D")
+-    except TypeError:
+-        return obj.ohlcv(count=count_fallback, interval="1D")
++    # vnstock 6 kiểm tra chặt tham số: tham số không hỗ trợ báo VNSTOCK_INPUT_PARAM ngay (không còn lối `count=` cũ).
++    return obj.ohlcv(start=start, end=end, interval="1D")
+ 
+ 
+ # ----------------------------------------------------------------------------
+@@ -337,20 +345,17 @@
+         return str(max(pd.Timestamp(self.history_start), old.index.max() - pd.Timedelta(days=45)).date())
+ 
+     def _vn_request(self, ticker: str, is_index: bool):
+-        """Gọi vnstock cho 1 mã, có giãn cách + tự chờ/thử lại khi vượt hạn mức.
+-        Lưu ý: khi hết hạn mức, thư viện vnstock có thể tự gọi sys.exit() (SystemExit - KHÔNG phải Exception) làm cả script
+-        chết giữa chừng, nên phải bắt riêng SystemExit."""
++        """Gọi vnstock cho 1 mã, có giãn cách + tự chờ/thử lại khi nguồn báo vượt hạn mức.
++        Lỗi khác (nguồn không hỗ trợ, sai tham số, chưa cấu hình nguồn...) được ném lên ngay, không thử lại."""
+         for attempt in range(VN_RL_RETRIES + 1):
+             if self.vn_limiter:
+                 self.vn_limiter.acquire(self.vn_calls_per_fetch)
+             try:
+                 market = self._get_vn()
+-                obj = market.index(symbol=ticker) if is_index else market.equity(symbol=ticker)
++                obj = market.index(ticker) if is_index else market.equity(ticker)
+                 return vnstock_ohlcv(obj, self._vn_start(ticker))
+-            except SystemExit:
+-                pass
+             except Exception as e:  # noqa: BLE001
+-                if not any(h in str(e).lower() for h in VN_RL_HINTS):
++                if not is_rate_limited(e):
+                     raise
+             if attempt == VN_RL_RETRIES:
+                 raise SourceError("vnstock vượt hạn mức")
+diff -ruN -x __pycache__ -x .pytest_cache base/requirements-vnstock6.txt gen6/requirements-vnstock6.txt
+--- base/requirements-vnstock6.txt	1970-01-01 00:00:00.000000000 +0000
++++ gen6/requirements-vnstock6.txt	2026-11-24 05:35:22.800439310 +0000
+@@ -0,0 +1,6 @@
++# Chỉ cài khi bạn chạy phần lấy dữ liệu bằng vnstock thế hệ 6 (fetch_data.py với PRICE_SOURCE=vnstock/auto, fetch_financials.py).
++# Các workflow hiện tại KHÔNG dùng file này (chúng chạy bằng TradingView) - xem README mục "vnstock thế hệ 6".
++# Khoảng phiên bản theo tài liệu chính thức: https://vnstocks.com/docs/vnstock/v6/gioi-thieu
++--extra-index-url https://vnstocks.com/api/packages
++vnstock>=6.0.0,<7
++vnstock-oapi>=0.1.0,<1
+diff -ruN -x __pycache__ -x .pytest_cache base/tests/test_vnstock6.py gen6/tests/test_vnstock6.py
+--- base/tests/test_vnstock6.py	1970-01-01 00:00:00.000000000 +0000
++++ gen6/tests/test_vnstock6.py	2026-11-24 06:16:56.705527782 +0000
+@@ -0,0 +1,203 @@
++"""Kiểm thử lớp tương thích vnstock thế hệ 6 bằng dữ liệu GIẢ (không cần mạng, không cần cài vnstock).
++Chạy từ thư mục gốc repo:  python -m pytest tests -q
++"""
++import os
++import sys
++import types
++
++import pandas as pd
++import pytest
++
++sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
++
++_fake = types.ModuleType("tvDatafeed")
++_fake.Interval = types.SimpleNamespace(in_daily="1D")
++sys.modules.setdefault("tvDatafeed", _fake)
++
++import fetch_data  # noqa: E402
++import fetch_financials  # noqa: E402
++import price_sources  # noqa: E402
++import vnstock_adapter as va  # noqa: E402
++
++
++class CodedError(Exception):
++    def __init__(self, code, msg=""):
++        super().__init__(msg or code)
++        self.code = code
++
++
++# ---- nguồn khai báo một chỗ ----------------------------------------------------------------------
++def test_get_source_requires_explicit_value(monkeypatch):
++    monkeypatch.delenv("VNSTOCK_SOURCE", raising=False)
++    with pytest.raises(va.SourceNotConfigured):
++        va.get_source()
++
++
++def test_get_source_normalizes_and_supports_fallback(monkeypatch):
++    monkeypatch.setenv("VNSTOCK_SOURCE", "  TCBS ")
++    monkeypatch.delenv("FIN_SOURCE", raising=False)
++    assert va.get_source() == "tcbs"
++    assert va.get_source("FIN_SOURCE", fallback_env="VNSTOCK_SOURCE") == "tcbs"
++    monkeypatch.setenv("FIN_SOURCE", "fhsc")
++    assert va.get_source("FIN_SOURCE", fallback_env="VNSTOCK_SOURCE") == "fhsc"
++
++
++def test_make_vnstock_without_source_is_reported_as_source_error(monkeypatch):
++    monkeypatch.delenv("VNSTOCK_SOURCE", raising=False)
++    with pytest.raises(price_sources.SourceError, match="VNSTOCK_SOURCE"):
++        fetch_data.make_vnstock()
++
++
++# ---- nhận diện lỗi -------------------------------------------------------------------------------
++def test_error_code_from_attribute_and_message():
++    assert va.error_code(CodedError("VNSTOCK_INPUT_SOURCE")) == "VNSTOCK_INPUT_SOURCE"
++    assert va.error_code(RuntimeError("lỗi VNSTOCK_SOURCE_UNAVAILABLE: bảo trì")) == "VNSTOCK_SOURCE_UNAVAILABLE"
++    assert va.error_code(RuntimeError("không có mã")) == ""
++
++
++def test_rate_limit_and_unsupported_detection():
++    assert va.is_rate_limited(RuntimeError("HTTP 429 Too Many Requests"))
++    assert va.is_rate_limited(CodedError("VNSTOCK_SOURCE_RATE_LIMITED"))
++    assert not va.is_rate_limited(CodedError("VNSTOCK_INPUT_PARAM"))
++    assert va.is_unsupported(CodedError("VNSTOCK_ROUTE_UNSUPPORTED"))
++    assert va.is_unsupported(CodedError("VNSTOCK_INPUT_SOURCE"))
++    assert not va.is_unsupported(CodedError("VNSTOCK_SOURCE_UNAVAILABLE"))
++
++
++# ---- chuẩn hoá nến vnstock 6 ---------------------------------------------------------------------
++def test_vnstock_frame_handles_tz_aware_unsorted_int64():
++    t = pd.to_datetime(["2026-06-03 07:00", "2026-06-01 07:00", "2026-06-02 07:00"]).tz_localize("Asia/Ho_Chi_Minh")
++    df = pd.DataFrame({"time": t, "open": [3.0, 1.0, 2.0], "high": [3.1, 1.1, 2.1], "low": [2.9, 0.9, 1.9],
++                       "close": [3.0, 1.0, 2.0], "volume": pd.array([300, 100, 200], dtype="Int64")})
++    out = price_sources.vnstock_frame(df, "FPT")
++    assert list(out["close"]) == [1.0, 2.0, 3.0]                       # tăng dần theo ngày
++    assert out["date"].dt.tz is None and out["date"].dt.hour.eq(7).all()  # bỏ múi giờ, giữ 07:00
++    assert list(out["volume"]) == [100, 200, 300] and (out["ticker"] == "FPT").all()
++
++
++def test_vnstock_frame_drops_duplicate_dates_and_empty():
++    assert price_sources.vnstock_frame(pd.DataFrame(), "X") is None
++    d = pd.to_datetime(["2026-06-01 07:00", "2026-06-01 07:00"])
++    out = price_sources.vnstock_frame(pd.DataFrame({"time": d, "close": [1.0, 2.0], "volume": [1, 2]}), "X")
++    assert len(out) == 1 and out["close"].iloc[0] == 2.0
++
++
++def test_vnstock_ohlcv_uses_documented_signature_only():
++    class Obj:
++        def ohlcv(self, start, end, interval):
++            self.args = (start, interval)
++            return "ok"
++    o = Obj()
++    assert price_sources.vnstock_ohlcv(o, "2026-01-01") == "ok" and o.args == ("2026-01-01", "1D")
++
++
++def test_rate_limited_error_retries_then_succeeds():
++    calls = {"n": 0}
++
++    class Obj:
++        def ohlcv(self, start, end, interval):
++            calls["n"] += 1
++            if calls["n"] == 1:
++                raise CodedError("VNSTOCK_SOURCE_RATE_LIMITED", "vượt hạn mức")
++            return pd.DataFrame({"time": pd.to_datetime(["2026-06-01 07:00"]), "close": [1.0], "volume": [1]})
++
++    class Market:
++        def equity(self, symbol):
++            return Obj()
++        def index(self, symbol):
++            return Obj()
++
++    f = price_sources.PriceFetcher(mode="vnstock", history={}, vn_factory=lambda: Market(), sleep=lambda s: None)
++    res = f.fetch("AAA")
++    assert res.source == "vnstock" and calls["n"] == 2
++
++
++def test_non_rate_limit_error_is_not_retried():
++    calls = {"n": 0}
++
++    class Obj:
++        def ohlcv(self, start, end, interval):
++            calls["n"] += 1
++            raise CodedError("VNSTOCK_INPUT_PARAM")
++
++    class Market:
++        def equity(self, symbol):
++            return Obj()
++
++    f = price_sources.PriceFetcher(mode="vnstock", history={}, vn_factory=lambda: Market(), sleep=lambda s: None)
++    res = f.fetch("AAA")
++    assert res.df is None and calls["n"] == 1
++
++
++# ---- báo cáo tài chính -------------------------------------------------------------------------
++def v5_wide():
++    return pd.DataFrame({
++        "id": ["BS_SHORT_TERM_ASSETS", "BS_TOTAL_ASSETS"], "item": ["TÀI SẢN NGẮN HẠN", "TỔNG TÀI SẢN"],
++        "order": [1, 2], "level": [1, 1], "unit": ["VNĐ", "VNĐ"], "line_code": ["100", "270"],
++        "2025-Q3": [1.0e13, 2.0e13], "2025-Q4": [1.1e13, 2.1e13],
++    })
++
++
++def test_to_legacy_wide_maps_v5_columns():
++    out = fetch_financials.to_legacy_wide(v5_wide())
++    assert list(out.columns) == ["item", "item_id", "2025-Q3", "2025-Q4"]
++    assert list(out["item_id"]) == ["BS_SHORT_TERM_ASSETS", "BS_TOTAL_ASSETS"]
++
++
++def test_to_legacy_wide_rejects_unknown_shape():
++    with pytest.raises(ValueError):
++        fetch_financials.to_legacy_wide(pd.DataFrame({"a": [1]}))
++
++
++class FakeEquity:
++    def __init__(self, fail_code=None):
++        self.fail_code = fail_code
++    def _call(self, **kw):
++        if self.fail_code:
++            raise CodedError(self.fail_code)
++        assert kw["format"] == "wide" and kw["period"] == "quarter" and kw["source"] == "fhsc"
++        return v5_wide()
++    income_statement = balance_sheet = cash_flow = lambda self, **kw: self._call(**kw)
++
++
++class FakeFundamental:
++    def __init__(self, fail_code=None):
++        self.fail_code = fail_code
++    def equity(self, ticker):
++        return FakeEquity(self.fail_code)
++
++
++def test_fetch_ticker_financials_ok_and_unsupported(monkeypatch):
++    monkeypatch.setattr(fetch_financials.time, "sleep", lambda s: None)
++    res, uns = fetch_financials.fetch_ticker_financials("FPT", "fhsc", FakeFundamental())
++    assert set(res) == {"income_statement", "balance_sheet", "cash_flow"} and uns == 0
++    assert res["balance_sheet"]["columns"][:2] == ["item", "item_id"]
++    res, uns = fetch_financials.fetch_ticker_financials("FPT", "fhsc", FakeFundamental("VNSTOCK_ROUTE_UNSUPPORTED"))
++    assert res == {} and uns == 3
++
++
++def test_fin_limit_writes_sample_file_not_the_real_one(monkeypatch, tmp_path):
++    monkeypatch.chdir(tmp_path)
++    pd.DataFrame({"symbol": ["AAA", "BBB", "CCC"]}).to_csv("danh_sach_ma_theo_nganh.csv", index=False)
++    monkeypatch.setenv("VNSTOCK_SOURCE", "fhsc")
++    monkeypatch.setenv("FIN_LIMIT", "2")
++    monkeypatch.setattr(fetch_financials, "make_fundamental", lambda: FakeFundamental())
++    monkeypatch.setattr(fetch_financials.time, "sleep", lambda s: None)
++    fetch_financials.main()
++    import json
++    sample = json.load(open("financials_data.sample.json", encoding="utf-8"))
++    assert list(sample["tickers"]) == ["AAA", "BBB"]
++    assert not os.path.exists("financials_data.json")
++
++
++def test_financials_stops_early_when_source_has_no_fundamental(monkeypatch, tmp_path, capsys):
++    monkeypatch.chdir(tmp_path)
++    pd.DataFrame({"symbol": [f"T{i}" for i in range(10)]}).to_csv("danh_sach_ma_theo_nganh.csv", index=False)
++    monkeypatch.setenv("VNSTOCK_SOURCE", "tcbs")
++    monkeypatch.delenv("FIN_LIMIT", raising=False)
++    monkeypatch.setattr(fetch_financials, "make_fundamental", lambda: FakeFundamental("VNSTOCK_ROUTE_UNSUPPORTED"))
++    monkeypatch.setattr(fetch_financials.time, "sleep", lambda s: None)
++    fetch_financials.main()
++    out = capsys.readouterr().out
++    assert "không hỗ trợ báo cáo tài chính" in out and "[4/10]" not in out
++    assert not os.path.exists("financials_data.json")
+diff -ruN -x __pycache__ -x .pytest_cache base/vnstock_adapter.py gen6/vnstock_adapter.py
+--- base/vnstock_adapter.py	1970-01-01 00:00:00.000000000 +0000
++++ gen6/vnstock_adapter.py	2026-11-24 05:36:18.124335581 +0000
+@@ -0,0 +1,71 @@
++"""Lớp mỏng nối vnstock THẾ HỆ 6 (Open API): mọi chỗ phụ thuộc vào "nguồn dữ liệu" nằm ở đây.
++
++Mục tiêu: sau này đổi nguồn (tcbs, ssi, dnse, fhsc...) chỉ cần đổi biến môi trường, KHÔNG sửa code.
++
++  VNSTOCK_SOURCE   tên nguồn Open API bạn đã đăng ký khoá (vd tcbs | ssi | dnse | fhsc). KHÔNG có giá trị mặc định:
++                   thế hệ 6 không tự chọn nguồn thay bạn, code này cũng vậy.
++  FIN_SOURCE       (tuỳ chọn) nguồn riêng cho báo cáo tài chính; để trống = dùng VNSTOCK_SOURCE.
++                   Lưu ý: theo tài liệu thế hệ 6.0.1, báo cáo tài chính hiện chỉ có ở nguồn `fhsc`.
++
++Khoá API của nguồn và khoá tài khoản Vnstock KHÔNG nằm trong code: đặt bằng `vnstock keys set <nguồn>` /
++`vnstock login` trên máy, hoặc biến môi trường (<NGUỒN>_API_KEY, VNSTOCK_API_KEY) trong GitHub Secrets.
++"""
++import os
++import re
++
++SOURCE_ENV = "VNSTOCK_SOURCE"
++FIN_SOURCE_ENV = "FIN_SOURCE"
++
++# Mã lỗi ổn định của vnstock 6 (xem vnstocks.com/docs/vnstock/v6/xu-ly-loi). Chỉ dùng mã khi chắc chắn,
++# còn lại so khớp theo từ khoá để không phụ thuộc vào tên mã cụ thể.
++_CODE_RE = re.compile(r"VNSTOCK_[A-Z0-9_]+")
++RATE_LIMIT_HINTS = ("rate limit", "hạn mức", "ha n muc", "429", "too many requests")
++UNSUPPORTED_CODES = ("VNSTOCK_ROUTE_UNSUPPORTED", "VNSTOCK_INPUT_SOURCE", "VNSTOCK_VAS_TEMPLATE_UNSUPPORTED")
++
++
++class SourceNotConfigured(RuntimeError):
++    """Chưa khai báo nguồn dữ liệu (VNSTOCK_SOURCE)."""
++
++
++def get_source(env_name: str = SOURCE_ENV, fallback_env: str = "") -> str:
++    """Đọc tên nguồn từ biến môi trường. Không có -> báo lỗi rõ ràng, không đoán."""
++    value = (os.environ.get(env_name) or (os.environ.get(fallback_env) if fallback_env else "") or "").strip().lower()
++    if not value:
++        raise SourceNotConfigured(
++            f"chưa khai báo nguồn dữ liệu: đặt biến môi trường {env_name}=<nguồn> (vd tcbs, ssi, dnse, fhsc)"
++        )
++    return value
++
++
++def error_code(exc: BaseException) -> str:
++    """Mã lỗi VNSTOCK_* của một ngoại lệ (thuộc tính .code, hoặc tìm trong nội dung), '' nếu không có."""
++    code = getattr(exc, "code", None)
++    if isinstance(code, str) and code:
++        return code
++    m = _CODE_RE.search(str(exc))
++    return m.group(0) if m else ""
++
++
++def is_rate_limited(exc: BaseException) -> bool:
++    code = error_code(exc).upper()
++    if "RATE" in code or "LIMIT" in code or "THROTTLE" in code:
++        return True
++    return any(h in str(exc).lower() for h in RATE_LIMIT_HINTS)
++
++
++def is_unsupported(exc: BaseException) -> bool:
++    """Nguồn đã chọn không có chức năng này (hoặc chưa chọn nguồn): thử lại cũng vô ích."""
++    code = error_code(exc).upper()
++    return code in UNSUPPORTED_CODES or "UNSUPPORTED" in code
++
++
++def make_market(source: str = ""):
++    """Market(<nguồn>) của vnstock 6. Import muộn để các workflow không dùng vnstock không cần cài thư viện."""
++    source = source or get_source()          # kiểm tra nguồn TRƯỚC khi import để báo lỗi đúng chỗ
++    from vnstock import Market  # noqa: PLC0415
++    return Market(source)
++
++
++def make_fundamental():
++    from vnstock import Fundamental  # noqa: PLC0415
++    return Fundamental()
