@@ -1,11 +1,13 @@
-name: Cập nhật giá RS (vnstock - 6 lần/ngày T2-T6, chỉ phần đuôi)
+name: Cập nhật giá RS (TradingView + fhsc dự phòng - 6 lần/ngày T2-T6, chỉ phần đuôi)
 
-# Workflow này CHỈ lấy giá bằng VNSTOCK (tăng dần, ~45 ngày gần nhất) vào các giờ giao dịch T2-T6.
-# - Lấy toàn bộ lịch sử từ vnstock (15 lần/ngày, cả cuối tuần): update_data_full.yml
+# Giá lấy bằng TRADINGVIEW (tvdatafeed) là chính; mã nào TradingView lỗi/không khớp, hoặc mã mới chưa có lịch sử,
+# thì dùng vnstock thế hệ 6 với nguồn fhsc (PRICE_SOURCE=auto). Cần Secret FHSC_API_KEY (khoá FHSC hết hạn sau 30 ngày,
+# phải tạo lại và cập nhật Secret định kỳ). Thiếu khoá/không cài được vnstock 6 -> chỉ mất phần dự phòng.
+# - Lấy toàn bộ lịch sử (15 lần/ngày, cả cuối tuần): update_data_full.yml
 # - Vĩ mô + lãi suất trái phiếu: update_macro.yml
 # - Giá bằng TradingView: update_data_tv.yml (Chủ nhật + thứ Hai)
 # Các workflow giá cùng ghi gia_lich_su_rs.csv nên dùng chung nhóm concurrency "data-update" (chạy lần lượt, không chồng nhau;
-# cũng đảm bảo không có 2 lần gọi vnstock song song làm vượt hạn mức 60 request/phút).
+# cũng đảm bảo không có 2 lần gọi nguồn giá song song làm bị giới hạn request).
 
 on:
   schedule:
@@ -25,7 +27,7 @@ on:
   workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
     inputs:
       full_refresh:
-        description: "Lấy lại toàn bộ lịch sử từ vnstock (chậm hơn: ~2 giây/mã)"
+        description: "Lấy lại toàn bộ lịch sử (TradingView tối đa 5000 nến, mã lỗi chuyển sang fhsc; chậm hơn)"
         type: boolean
         default: false
 
@@ -35,7 +37,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  update-data-vnstock:
+  update-data:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -51,14 +53,20 @@ jobs:
       - name: Cài thư viện
         run: pip install -r requirements.txt
 
-      - name: Chạy script lấy dữ liệu giá cổ phiếu (vnstock)
+      - name: Cài vnstock thế hệ 6 (nguồn dự phòng fhsc)
+        # Nếu không cài được thì chỉ cảnh báo: workflow vẫn chạy bằng TradingView, chỉ mất phần dự phòng.
+        run: pip install -r requirements-vnstock6.txt || echo "::warning::Không cài được vnstock 6; chạy chỉ với TradingView"
+
+      - name: Chạy script lấy dữ liệu giá cổ phiếu (TradingView)
         env:
-          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
-          PRICE_SOURCE: vnstock
+          TV_USERNAME: ${{ secrets.TV_USERNAME }}      # tuỳ chọn; để trống = đăng nhập ẩn danh
+          TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+          PRICE_SOURCE: auto
+          VNSTOCK_SOURCE: fhsc
+          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
           FULL_REFRESH: ${{ inputs.full_refresh == true && '1' || '' }}
           PYTHONUNBUFFERED: "1"
-          VN_RPM: "55"
-          VN_CALLS_PER_FETCH: "2"
+          VN_RPM: "30"
         run: python fetch_data.py
 
       - name: Commit và push file dữ liệu + báo cáo mới

@@ -4,11 +4,15 @@ name: Cập nhật báo cáo tài chính (BCTC)
 # thay đổi trong ngày — nên không cần lấy lại nhiều lần/ngày như giá cổ phiếu. Chạy workflow
 # này 1 lần/ngày là đủ, giúp giảm đáng kể tổng thời gian chạy Actions mỗi ngày.
 
+# Lấy BCTC bằng vnstock thế hệ 6, nguồn fhsc (Secret FHSC_API_KEY; khoá FHSC hết hạn sau 30 ngày).
+# LỊCH CHẠY ĐANG TẮT: hãy bấm chạy tay (Run workflow) lần đầu, so sánh financials_data.json mới với bản cũ
+# (máy chưa đăng nhập gói Vnstock chỉ nhận chỉ tiêu cấp 1 -> số dòng có thể ít hơn, và bảng ratio không còn),
+# rồi mới bật lịch bằng cách bỏ dấu # các dòng dưới đây:
+#   schedule:
+#     # 8:00 sáng giờ VN (UTC+7) = 01:00 UTC -> chạy T2-T6. Chạy trước lần chạy giá đầu
+#     # tiên trong ngày (09:30 giờ VN) để tránh 2 workflow cùng commit/push 1 lúc.
+#     - cron: "0 1 * * 1-5"
 on:
-  schedule:
-    # 8:00 sáng giờ VN (UTC+7) = 01:00 UTC -> chạy T2-T6. Chạy trước lần chạy giá đầu
-    # tiên trong ngày (09:30 giờ VN) để tránh 2 workflow cùng commit/push 1 lúc.
-    - cron: "0 1 * * 1-5"
   workflow_dispatch: {}  # cho phép bấm chạy tay từ tab Actions trên GitHub
 
 jobs:
@@ -28,9 +32,15 @@ jobs:
       - name: Cài thư viện
         run: pip install -r requirements.txt
 
+      - name: Cài vnstock thế hệ 6
+        run: pip install -r requirements-vnstock6.txt
+
       - name: Chạy script lấy báo cáo tài chính
         env:
-          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          VNSTOCK_SOURCE: fhsc
+          FIN_SOURCE: fhsc
+          FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}   # tuỳ chọn: khoá tài khoản Vnstock (mở chỉ tiêu BCTC đầy đủ)
         run: python fetch_financials.py
         continue-on-error: true  # BCTC là phần phụ trợ; lỗi/timeout ở bước này không nên
                                   # làm cả workflow fail (vd. nguồn dữ liệu tạm gián đoạn)
