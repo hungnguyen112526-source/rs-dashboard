@@ -413,8 +413,12 @@ _TV_HTML = """<!doctype html><meta charset="utf-8">
 #t{position:absolute;left:10px;top:6px;z-index:3;font-weight:600;color:__FG__;pointer-events:none}
 #o{position:absolute;left:10px;top:24px;right:90px;z-index:3;color:__FG__;font-size:11px;line-height:1.5;pointer-events:none}
 #r{position:absolute;right:62px;top:6px;z-index:3;border:1px solid __GRID__;background:transparent;color:__FG__;
-border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}</style>
-<div id="c"></div><div id="t"></div><div id="o"></div><button id="r" title="Về mặc định">⟲ Reset</button>
+border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}
+#dv{position:absolute;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none}
+#tb{position:absolute;left:6px;top:52px;z-index:4;display:flex;flex-direction:column;gap:3px}
+#tb button{width:30px;height:26px;padding:0;border:1px solid __GRID__;background:rgba(128,128,128,.12);color:__FG__;border-radius:6px;font-size:12px;cursor:pointer}
+#tb button.on{background:rgba(41,98,255,.35);border-color:#2962ff}</style>
+<div id="c"></div><canvas id="dv"></canvas><div id="t"></div><div id="o"></div><div id="tb"></div><button id="r" title="Về mặc định">⟲ Reset</button>
 __LIB__
 <script>
 const D = __DATA__, FG = "__FG__", GRID = "__GRID__", L = LightweightCharts, UP = "#16a34a", DN = "#dc2626";
@@ -461,6 +465,127 @@ function show(t) {
 const first = D.panes[0].series[0].data, lastT = first[first.length - 1].time; show(lastT);
 chart.subscribeCrosshairMove(p => { show(p.time ? tkey(p.time) : lastT); });
 document.getElementById("r").onclick = () => { chart.priceScale("right").applyOptions({ autoScale: true }); chart.timeScale().fitContent(); };
+// ---- Công cụ vẽ: thước đo, đường xu hướng, đường ngang, hộp, Fibonacci (chỉ hiện ở biểu đồ có nến)
+(function () {
+  const tb = document.getElementById("tb");
+  try {
+    if (!D.panes[0].series.some(s => s.type === "candle")) { tb.style.display = "none"; return; }
+    const main = H[0][1], wrap = document.getElementById("c"), ts = chart.timeScale();
+    const cv = document.getElementById("dv"), g = cv.getContext("2d");
+    const BLUE = "#2962ff", UPA = "rgba(22,163,74,.16)", DNA = "rgba(220,38,38,.16)", BLA = "rgba(41,98,255,.12)";
+    const times = first.map(x => x.time), key = "rsdraw:" + D.title;
+    let shapes = [], ruler = null, pend = null, hover = null, tool = "";
+    try { shapes = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { shapes = []; }
+    const save = () => { try { localStorage.setItem(key, JSON.stringify(shapes)); } catch (e) {} };
+
+    const offX = () => { try { return D.left ? chart.priceScale("left").width() : 0; } catch (e) { return 0; } };
+    const plotW = () => ts.width(), plotH = () => chart.panes()[0].getHeight();
+    const X = l => ts.logicalToCoordinate(l), Y = p => main.priceToCoordinate(p);
+    const fp = p => Math.abs(p) >= 1000 ? p.toFixed(0) : p.toFixed(2);
+    const day = l => { const i = Math.round(l); return i >= 0 && i < times.length ? new Date(times[i] + "T00:00:00Z") : null; };
+
+    function pt(e) {
+      const r = wrap.getBoundingClientRect(), x = e.clientX - r.left - offX(), y = e.clientY - r.top;
+      if (x < 0 || x > plotW() || y < 0 || y > plotH()) return null;
+      const l = ts.coordinateToLogical(x), p = main.coordinateToPrice(y);
+      return l == null || p == null ? null : { l: Math.round(l), p: p };
+    }
+
+    function tag(lines, x, y, col) {
+      g.font = "11px system-ui, sans-serif";
+      const w = Math.max.apply(null, lines.map(s => g.measureText(s).width)) + 10, h = lines.length * 14 + 6;
+      x = Math.min(Math.max(x, 2), plotW() - w - 2); y = Math.min(Math.max(y, 2), plotH() - h - 2);
+      g.fillStyle = col; g.fillRect(x, y, w, h); g.fillStyle = "#fff";
+      lines.forEach((s, i) => g.fillText(s, x + 5, y + 14 + i * 14 - 1));
+    }
+
+    function drawShape(s, b) {
+      const a = s.a, x1 = X(a.l), y1 = Y(a.p);
+      if (x1 == null || y1 == null) return;
+      g.lineWidth = 1.5; g.setLineDash([]); g.strokeStyle = BLUE;
+      if (s.t === "h") {
+        g.setLineDash([5, 4]); g.beginPath(); g.moveTo(0, y1); g.lineTo(plotW(), y1); g.stroke(); g.setLineDash([]);
+        tag([fp(a.p)], plotW() - 62, y1 - 10, BLUE); return;
+      }
+      b = b || s.b; if (!b) return;
+      const x2 = X(b.l), y2 = Y(b.p);
+      if (x2 == null || y2 == null) return;
+      if (s.t === "m") {                       // thước đo
+        const dp = b.p - a.p, pc = dp / a.p * 100, n = Math.round(Math.abs(b.l - a.l)), d1 = day(a.l), d2 = day(b.l);
+        const days = d1 && d2 ? Math.round(Math.abs(d2 - d1) / 864e5) : null, col = dp >= 0 ? UP : DN;
+        g.fillStyle = dp >= 0 ? UPA : DNA; g.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        g.strokeStyle = col; g.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+        tag([(dp >= 0 ? "+" : "") + fp(dp) + " (" + (pc >= 0 ? "+" : "") + pc.toFixed(2) + "%)",
+             n + " phiên" + (days != null ? " · " + days + " ngày" : "")], Math.max(x1, x2) + 8, (y1 + y2) / 2 - 17, col);
+      } else if (s.t === "t") {                // đường xu hướng
+        g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      } else if (s.t === "r") {                // hộp chữ nhật
+        g.fillStyle = BLA; g.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        g.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+      } else if (s.t === "f") {                // Fibonacci thoái lui
+        const L0 = Math.min(x1, x2), L1 = Math.max(x1, x2);
+        [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].forEach(lv => {
+          const p = b.p + (a.p - b.p) * lv, y = Y(p); if (y == null) return;
+          g.globalAlpha = 0.85; g.beginPath(); g.moveTo(L0, y); g.lineTo(L1, y); g.stroke(); g.globalAlpha = 1;
+          g.fillStyle = BLUE; g.font = "11px system-ui, sans-serif"; g.fillText(lv + "  (" + fp(p) + ")", L1 + 4, y + 4);
+        });
+      }
+    }
+
+    function paint() {
+      const dpr = window.devicePixelRatio || 1, w = wrap.clientWidth, h = wrap.clientHeight;
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+      if (!shapes.length && !ruler && !pend) return;
+      g.save(); g.translate(offX(), 0); g.beginPath(); g.rect(0, 0, plotW(), plotH()); g.clip();
+      shapes.forEach(s => drawShape(s));
+      if (ruler) drawShape(ruler);
+      if (pend && hover) drawShape(pend, hover);
+      else if (pend) { const x = X(pend.a.l), y = Y(pend.a.p); if (x != null && y != null) { g.fillStyle = BLUE; g.beginPath(); g.arc(x, y, 3.5, 0, 6.3); g.fill(); } }
+      g.restore();
+    }
+    let raf = 0;
+    const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; try { paint(); } catch (e) {} }); };
+
+    const BTN = [["", "↖", "Con trỏ (Esc)"], ["m", "📏", "Thước đo: bấm 2 điểm để đo % và số phiên"], ["t", "╱", "Đường xu hướng"],
+                 ["h", "─", "Đường ngang"], ["r", "▭", "Hộp chữ nhật"], ["f", "Fib", "Fibonacci thoái lui"]];
+    const btns = {};
+    function setTool(t) {
+      tool = t; pend = null; hover = null; ruler = null;
+      Object.keys(btns).forEach(k => btns[k].classList.toggle("on", k === t));
+      wrap.style.cursor = t ? "crosshair" : ""; redraw();
+    }
+    BTN.forEach(([k, txt, tip]) => {
+      const b = document.createElement("button"); b.textContent = txt; b.title = tip; b.onclick = () => setTool(k);
+      tb.appendChild(b); btns[k] = b;
+    });
+    const act = (txt, tip, fn) => { const b = document.createElement("button"); b.textContent = txt; b.title = tip; b.onclick = fn; tb.appendChild(b); };
+    act("↶", "Xoá nét vẽ gần nhất", () => { shapes.pop(); save(); redraw(); });
+    act("🗑", "Xoá tất cả nét vẽ", () => { shapes = []; ruler = null; pend = null; save(); redraw(); });
+    if (D.left) tb.style.left = "62px";
+    btns[""].classList.add("on");
+
+    let down = null;
+    wrap.addEventListener("mousedown", e => { down = [e.clientX, e.clientY]; }, true);
+    wrap.addEventListener("click", e => {
+      if (!tool || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;   // kéo để di chuyển thì bỏ qua
+      const p = pt(e); if (!p) return;
+      if (tool === "h") { shapes.push({ t: "h", a: p }); save(); }
+      else if (!pend) { ruler = null; pend = { t: tool, a: p }; }
+      else if (tool === "m") { ruler = { t: "m", a: pend.a, b: p }; pend = null; }
+      else { shapes.push({ t: pend.t, a: pend.a, b: p }); pend = null; save(); }
+      hover = null; redraw();
+    }, true);
+    wrap.addEventListener("mousemove", e => { if (tool && pend) hover = pt(e) || hover; redraw(); });
+    wrap.addEventListener("wheel", redraw, { passive: true });
+    window.addEventListener("mouseup", () => setTimeout(redraw, 0));
+    document.addEventListener("keydown", e => { if (e.key === "Escape") setTool(""); });
+    document.getElementById("r").addEventListener("click", () => setTimeout(redraw, 80));
+    ts.subscribeVisibleLogicalRangeChange(redraw); chart.subscribeCrosshairMove(redraw);
+    new ResizeObserver(redraw).observe(wrap); setInterval(redraw, 600); redraw();
+  } catch (err) { tb.style.display = "none"; }
+})();
 </script>"""
 
 
