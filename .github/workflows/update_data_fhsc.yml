@@ -1,10 +1,11 @@
-name: Cập nhật giá RS (fhsc ghi đè TradingView - 3 lần/ngày T2-T6)
+name: Cập nhật giá RS (fhsc - TOÀN BỘ lịch sử, 3 lần/ngày T2-T6)
 
-# Lấy giá bằng vnstock thế hệ 6, nguồn fhsc (PRICE_SOURCE=vnstock: KHÔNG dùng TradingView), ~45 ngày gần nhất cho mọi mã + VNINDEX.
-# Phiên trùng ngày/mã với dữ liệu TradingView đang có thì lấy bản fhsc (merge_with_existing giữ dòng mới nhất).
+# Workflow lấy giá DUY NHẤT của dự án: vnstock thế hệ 6, nguồn fhsc, cho mọi mã + VNINDEX.
+# Mỗi lần chạy lấy lại TOÀN BỘ lịch sử (PRICE_SOURCE=vnstock + FULL_REFRESH=1: không dùng TradingView; bắt đầu từ HISTORY_START).
+# Phiên trùng ngày/mã với dữ liệu hiện có thì lấy bản fhsc (merge_with_existing giữ dòng mới nhất); phiên cũ mà
+# fhsc không còn trả về vẫn được giữ nguyên, lịch sử chỉ dài thêm, không bị cắt.
 # Cần Secret FHSC_API_KEY (khoá FHSC hết hạn sau 30 ngày: phải tạo lại và cập nhật Secret định kỳ).
-# Dùng chung nhóm concurrency "data-update" với các workflow giá khác (cùng ghi gia_lich_su_rs.csv) nên chạy lần lượt.
-# Lưu ý: GitHub chỉ giữ 1 lần chạy đang CHỜ trong mỗi nhóm; nếu nhiều workflow giá cùng xếp hàng, lần chờ cũ có thể bị bỏ.
+# Giữ nhóm concurrency "data-update" để các lần chạy xếp hàng lần lượt (cùng ghi gia_lich_su_rs.csv, không gọi nguồn song song).
 
 on:
   schedule:
@@ -15,7 +16,7 @@ on:
     - cron: "40 8 * * 1-5"
     # 18:00 VN (bản chốt cuối ngày)
     - cron: "0 11 * * 1-5"
-  workflow_dispatch:  # cho phép bấm chạy tay từ tab Actions trên GitHub
+  workflow_dispatch: {}  # bấm chạy tay từ tab Actions trên GitHub
 
 concurrency:
   group: data-update
@@ -24,6 +25,7 @@ concurrency:
 jobs:
   update-data-fhsc:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: write
     steps:
@@ -50,9 +52,11 @@ jobs:
             exit 1
           fi
 
-      - name: Chạy script lấy giá cổ phiếu (vnstock 6 - fhsc)
+      - name: Lấy toàn bộ lịch sử giá cổ phiếu (vnstock 6 - fhsc)
         env:
           PRICE_SOURCE: vnstock
+          FULL_REFRESH: "1"
+          HISTORY_START: "2010-01-01"   # muốn lấy xa hơn thì đổi ngày này (lưu ý giới hạn 100 MB/file của GitHub)
           VNSTOCK_SOURCE: fhsc
           FHSC_API_KEY: ${{ secrets.FHSC_API_KEY }}
           PYTHONUNBUFFERED: "1"
@@ -64,16 +68,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add gia_lich_su_rs.csv
-          for f in price_source_log.json tv_exchange_map.json; do
-            if [ -f "$f" ]; then git add "$f"; fi
-          done
+          if [ -f price_source_log.json ]; then git add price_source_log.json; fi
 
           if git diff --cached --quiet; then
             echo "Không có gì thay đổi, bỏ qua commit/push."
             exit 0
           fi
 
-          git commit -m "Cập nhật giá RS (fhsc) tự động $(date +'%Y-%m-%d %H:%M')"
+          git commit -m "Cập nhật giá RS (fhsc full) tự động $(date +'%Y-%m-%d %H:%M')"
 
           # GitHub thỉnh thoảng trả "Internal Server Error" khi push (thường là lỗi tạm
           # thời phía GitHub, đặc biệt với commit thay đổi nhiều dữ liệu) -> tự thử lại

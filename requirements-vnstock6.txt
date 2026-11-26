@@ -1,5 +1,5 @@
 # Chỉ cài khi bạn chạy phần lấy dữ liệu bằng vnstock thế hệ 6 (fetch_data.py với PRICE_SOURCE=vnstock/auto, fetch_financials.py).
-# Các workflow hiện tại KHÔNG dùng file này (chúng chạy bằng TradingView) - xem README mục "vnstock thế hệ 6".
+# Workflow giá update_data_fhsc.yml cài file này (nguồn fhsc, full lịch sử 3 lần/ngày) - xem README mục "vnstock thế hệ 6".
 # Khoảng phiên bản theo tài liệu chính thức: https://vnstocks.com/docs/vnstock/v6/gioi-thieu
 --extra-index-url https://vnstocks.com/api/packages
 vnstock>=6.0.0,<7
