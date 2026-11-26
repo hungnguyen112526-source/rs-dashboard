@@ -1,47 +1,37 @@
-"""Dọn file gia_lich_su_rs.csv: bỏ các dòng ở ngày không phải phiên giao dịch thật.
+"""Làm sạch gia_lich_su_rs.csv một lần: bỏ các dòng thuộc ngày KHÔNG phải phiên giao dịch (thứ Bảy/Chủ nhật, ngày lễ,
+ngày chưa tới) do nguồn TradingView cũ trả thừa cho vài mã (ví dụ NAF). Các dòng này làm biểu đồ chỉ số dòng tiền bị
+cách ngày và làm lệch giá trị chỉ số.
 
-  - thứ Bảy / Chủ nhật
-  - ngày chỉ có vài mã trong khi phiên liền kề có rất nhiều mã (một vài mã bị gán lệch ngày, vd NAF)
-
-Chạy từ thư mục gốc repo:
-    python clean_price_csv.py --dry-run     # chỉ báo, không ghi
-    python clean_price_csv.py               # ghi đè gia_lich_su_rs.csv (giữ nguyên định dạng cột/ngày)
-Quy tắc trùng với rs_app/src/engine.py (drop_stray_days) nên app đã tự lọc khi đọc; dọn file chỉ để dữ liệu gốc sạch.
+Không bắt buộc: workflow lấy giá (fetch_data.py) và app (engine.load_prices) đã tự bỏ các dòng này mỗi lần chạy.
+Chạy tay (từ thư mục gốc repo):  python clean_price_csv.py            # chỉ báo cáo, không ghi file
+                                  python clean_price_csv.py --write    # ghi đè file (tạo bản sao .bak trước)
 """
-import argparse
+import shutil
 import sys
 
 import pandas as pd
 
-STRAY_RATIO = 0.2
-STRAY_MIN_REF = 30
+from price_sources import drop_non_sessions
+
+PATH = "gia_lich_su_rs.csv"
 
 
-def stray_mask(day: pd.Series) -> pd.Series:
-    d = pd.to_datetime(day).dt.tz_localize(None).dt.normalize()
-    n = d.groupby(d).size()
-    ref = pd.concat([n.shift(1), n.shift(-1)], axis=1).max(axis=1)
-    stray_days = set(n.index[(n < STRAY_RATIO * ref) & (ref >= STRAY_MIN_REF)])
-    return (d.dt.dayofweek >= 5) | d.isin(stray_days)
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", default="gia_lich_su_rs.csv")
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
-    df = pd.read_csv(args.csv, low_memory=False)
-    bad = stray_mask(df["date"])
-    removed = df[bad]
-    print(f"{len(df):,} dòng; sẽ bỏ {len(removed):,} dòng ở {pd.to_datetime(removed['date']).dt.normalize().nunique()} ngày lẻ")
-    if len(removed):
-        print(removed.groupby("ticker").size().sort_values(ascending=False).head(5).to_string())
-    if args.dry_run or not len(removed):
-        return 0
-    df[~bad].to_csv(args.csv, index=False)
-    print("Đã ghi", args.csv)
-    return 0
+def main(write: bool) -> None:
+    df = pd.read_csv(PATH, low_memory=False)
+    clean = drop_non_sessions(df)
+    dropped = df.loc[~df.index.isin(clean.index)]
+    days = pd.to_datetime(dropped["date"]).dt.normalize()
+    print(f"{len(df)} dòng -> {len(clean)} dòng; bỏ {len(dropped)} dòng thuộc {days.nunique()} ngày không phải phiên giao dịch.")
+    if len(dropped):
+        print("Mã bị ảnh hưởng:", dropped["ticker"].value_counts().head(10).to_dict())
+        print("Ngày gần nhất bị bỏ:", sorted(days.dt.strftime("%Y-%m-%d").unique())[-5:])
+    if not write:
+        print("Chưa ghi gì. Thêm --write để ghi đè file.")
+        return
+    shutil.copyfile(PATH, PATH + ".bak")
+    clean.to_csv(PATH, index=False)
+    print(f"Đã ghi {PATH} (bản cũ lưu ở {PATH}.bak).")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main("--write" in sys.argv[1:])

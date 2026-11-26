@@ -1,6 +1,6 @@
-# RS Dashboard (Streamlit) — có đăng ký / đăng nhập
+# FinSight (Streamlit) — có đăng ký / đăng nhập
 
-Bản Streamlit của RS Dashboard. Đợt 1 gồm: cổng đăng ký/đăng nhập, trang **Xếp hạng RS** (ngày/tuần),
+Bản Streamlit của FinSight (dự án rs-dashboard). Đợt 1 gồm: cổng đăng ký/đăng nhập, trang **Xếp hạng RS** (ngày/tuần),
 trang **Lọc KLGD giảm dần**, và trang **Quản trị người dùng** (chỉ admin).
 (Bản trang tĩnh HTML/GitHub Pages cũ đã được gỡ bỏ.)
 

@@ -30,7 +30,7 @@ class AIData:
     vnindex: pd.DataFrame                                  # giá VNINDEX
     scores_fn: Callable[[str], pd.DataFrame]               # frame -> bảng RS cổ phiếu ("day" | "week")
     industry_fn: Callable[[str], pd.DataFrame]             # frame -> bảng RS ngành
-    volume_fn: Callable[[], tuple]                         # -> (day_df, week_df, mốc_ngày, mốc_tuần)
+    volume_fn: Callable[..., tuple]                        # (direction='down'|'up') -> (day_df, week_df, mốc_ngày, mốc_tuần)
     json_fn: Callable[[str], Optional[dict]]               # tên file json -> dữ liệu (hoặc None)
     as_of: str = ""
 
@@ -167,12 +167,14 @@ class AITools:
                 "so_ket_qua_khop": int(len(sc)), "co_phieu": rows}
 
     def volume_decline_screen(self, frame: str = "day", min_tiers: int = 3, n: int = 15,
-                              industry: Optional[str] = None) -> dict:
-        """Bộ lọc KLGD giảm dần: mã có TB10 < TB20 < TB30 (3 mốc) hoặc < TB50 (4 mốc) = khối lượng co dần (thường
-        gặp khi cổ phiếu cạn cung/tích luỹ). frame='day'|'week'; min_tiers 3 hoặc 4; n tối đa 30; industry để lọc ngành.
-        Sắp xếp theo RS giảm dần."""
+                              industry: Optional[str] = None, direction: str = "down") -> dict:
+        """Bộ lọc KLGD. direction='down' (mặc định, giảm dần): mã có TB10 < TB20 < TB30 (3 mốc) hoặc < TB50 (4 mốc) =
+        khối lượng co dần (thường gặp khi cổ phiếu cạn cung/tích luỹ). direction='up' (tăng dần): ngược lại,
+        TB10 > TB20 > TB30 (> TB50) = khối lượng nở dần. frame='day'|'week'; min_tiers 3 hoặc 4; n tối đa 30;
+        industry để lọc ngành. Sắp xếp theo RS giảm dần."""
         f, n = _frame(frame), _clamp(n, 1, MAX_ROWS, 15)
-        day, week, d_last, w_last = self.d.volume_fn()
+        direction = "up" if str(direction).lower() in ("up", "tang", "tăng", "tang dan", "tăng dần") else "down"
+        day, week, d_last, w_last = self.d.volume_fn(direction)
         df = week if f == "week" else day
         if df is None or df.empty:
             return {"khung": f, "so_ket_qua": 0, "co_phieu": []}
@@ -185,7 +187,8 @@ class AITools:
                  "so_moc_dat": int(r["Số mốc đạt"]),
                  "TB10_so_voi_TB50_pct": _num(r[pct_col], 1) if pct_col else None,
                  "GTGD_TB20_ty_dong": _num(r.get("GTGD TB20 (tỷ)"), 1)} for _, r in df.head(n).iterrows()]
-        return {"khung": f, "moc_du_lieu": w_last if f == "week" else d_last,
+        return {"khung": f, "xu_huong": "tăng dần" if direction == "up" else "giảm dần",
+                "moc_du_lieu": w_last if f == "week" else d_last,
                 "so_ket_qua": int(len(df)), "co_phieu": rows}
 
     # ---- cổ phiếu ----

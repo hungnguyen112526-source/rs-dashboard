@@ -31,7 +31,8 @@ import time
 
 import pandas as pd
 
-from price_sources import PriceFetcher, RateLimiter, SourceError, load_history, load_json, save_json
+from price_sources import (PriceFetcher, RateLimiter, SourceError, drop_non_sessions, load_history, load_json,
+                           save_json)
 from vnstock_adapter import SourceNotConfigured, make_market
 
 SYMBOLS_FILE = "danh_sach_ma_theo_nganh.csv"
@@ -174,6 +175,10 @@ def main():
     # --- Gộp với file cũ + loại dòng trùng (cùng ngày + cùng mã) rồi lưu ---
     before_dedup = len(price_df)
     price_df = merge_with_existing(price_df, OUTPUT_FILE)
+    n_all = len(price_df)
+    price_df = drop_non_sessions(price_df)   # bỏ dòng ma ngoài phiên giao dịch (thứ Bảy, ngày chưa tới...)
+    if len(price_df) != n_all:
+        print(f"Đã bỏ {n_all - len(price_df)} dòng thuộc ngày không phải phiên giao dịch.")
     print(f"\nSau khi gộp với file cũ + loại trùng: {len(price_df)} dòng (chênh {len(price_df) - before_dedup:+d} so với dữ liệu vừa lấy).")
     price_df.to_csv(OUTPUT_FILE, index=False)
     print(f"Đã lưu file {OUTPUT_FILE}")

@@ -1,5 +1,5 @@
 """
-Tính toán RS (khung Ngày/Tuần) và bộ lọc KLGD giảm dần (công thức kiểu IBD RS Rating).
+Tính toán RS (khung Ngày/Tuần) và bộ lọc KLGD giảm dần / tăng dần (công thức kiểu IBD RS Rating).
 """
 from datetime import datetime, timedelta, timezone
 
@@ -15,9 +15,26 @@ PCT_COL = f"% TB{VOL_WINDOWS[0]} so với TB{VOL_WINDOWS[-1]}"
 VN_TZ = timezone(timedelta(hours=7))
 
 
+def drop_non_sessions(df: pd.DataFrame, date_col: str = "date", ticker_col: str = "ticker",
+                      min_share: float = 0.1, window: int = 61) -> pd.DataFrame:
+    """Bỏ các dòng thuộc ngày KHÔNG phải phiên giao dịch (thứ Bảy/Chủ nhật, ngày chưa tới...), vốn do nguồn
+    giá cũ (TradingView) trả thừa cho vài mã như NAF. Một ngày chỉ giữ lại khi số mã có dữ liệu đạt ít nhất
+    `min_share` (mặc định 10%) so với mức trung vị của ~`window` ngày quanh nó. Ngày thật bị thiếu hẳn thì
+    vẫn thiếu (không bịa thêm), nhưng không còn nến phẳng xen kẽ làm biểu đồ bị cách ngày.
+    (Bản sao cùng tên nằm ở price_sources.py cho phía lấy dữ liệu; hai bản phải giống nhau.)"""
+    if df.empty:
+        return df
+    day = pd.to_datetime(df[date_col]).dt.normalize()
+    cnt = df.groupby(day)[ticker_col].nunique().sort_index()
+    ref = cnt.rolling(window, center=True, min_periods=1).median()
+    ok = cnt >= (ref * min_share).clip(lower=1.0)
+    return df[day.map(ok).fillna(False).to_numpy(dtype=bool)]
+
+
 def load_prices(path) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["date"], low_memory=False)
     df = df.sort_values("date").drop_duplicates(subset=["date", "ticker"], keep="last")
+    df = drop_non_sessions(df)
     df["date"] = df["date"].dt.tz_localize(None).dt.normalize()
     return df.reset_index(drop=True)
 
@@ -84,26 +101,39 @@ def industry_rs(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------------
-# Lọc KLGD giảm dần
+# Lọc KLGD giảm dần / tăng dần
 # ----------------------------------------------------------------------------
 
-def _chain(v: np.ndarray):
+DIRECTIONS = ("down", "up")   # down: TB10 < TB20 < TB30 < TB50 (co dần) · up: TB10 > TB20 > TB30 > TB50 (nở dần)
+
+
+def _check_dir(direction: str) -> str:
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direction phải là 'down' hoặc 'up', không phải {direction!r}")
+    return direction
+
+
+def _chain(v: np.ndarray, direction: str = "down"):
+    _check_dir(direction)
     if len(v) < VOL_WINDOWS[-1]:
         return None
     mas = [float(np.mean(v[-w:])) for w in VOL_WINDOWS]
     tiers = 1
     for i in range(3):
-        if mas[i] < mas[i + 1]:
+        if (mas[i] < mas[i + 1]) if direction == "down" else (mas[i] > mas[i + 1]):
             tiers += 1
         else:
             break
     return mas, tiers
 
 
-def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None, min_tiers: int = 3):
+def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None, min_tiers: int = 3,
+                  direction: str = "down"):
     """Trả về (bảng_ngày, bảng_tuần, mốc_ngày_cuối, mốc_tuần_cuối).
-    Điều kiện đủ: TB10 < TB20 < TB30 < TB50 (4 mốc). 3 mốc = TB10<TB20<TB30 nhưng chưa < TB50.
+    direction="down": đủ khi TB10 < TB20 < TB30 < TB50 (4 mốc), 3 mốc = TB10<TB20<TB30 nhưng chưa < TB50.
+    direction="up": ngược lại, TB10 > TB20 > TB30 > TB50 (khối lượng nở dần).
     Bỏ phiên/tuần chưa kết thúc. Không lọc thanh khoản; GTGD TB20 chỉ để tham khảo."""
+    _check_dir(direction)
     now_vn = now_vn or datetime.now(VN_TZ)
     today, session_open = now_vn.date(), now_vn.hour < 15
     base = df[["date", "ticker", "close", "volume", "industry"]].dropna(subset=["volume"]).sort_values(["ticker", "date"])
@@ -133,7 +163,7 @@ def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None
                 "RS": rs,
             })
 
-        add("day", _chain(vol))
+        add("day", _chain(vol, direction))
         wk = g.set_index("date")["volume"].astype(float).resample("W-FRI").sum(min_count=1).dropna()
         if len(wk):
             wk_end = wk.index[-1].date()
@@ -141,16 +171,19 @@ def volume_screen(df: pd.DataFrame, rs_map: dict, now_vn: datetime | None = None
                 wk = wk.iloc[:-1]
         if len(wk):
             last_w.append(wk.index[-1])
-            add("week", _chain(wk.values))
+            add("week", _chain(wk.values, direction))
     day, week = pd.DataFrame(rows["day"]), pd.DataFrame(rows["week"])
     return (day, week,
             max(last_d).strftime("%d/%m/%Y") if last_d else None,
             max(last_w).strftime("%d/%m/%Y") if last_w else None)
 
 
-def volume_hits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = False, now_vn: datetime | None = None):
-    """Các mã TỪNG đủ điều kiện (TB10 < TB20 < TB30 < TB50) ở ít nhất một phiên/tuần trong khoảng [start, end].
+def volume_hits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = False, now_vn: datetime | None = None,
+                direction: str = "down"):
+    """Các mã TỪNG đủ điều kiện (giảm dần: TB10 < TB20 < TB30 < TB50; tăng dần: ngược lại) ở ít nhất một phiên/tuần
+    trong khoảng [start, end].
     Bỏ phiên/tuần chưa kết thúc. Trả về mỗi mã một dòng: lần đầu, lần cuối, số phiên/tuần đủ điều kiện, hiện trạng."""
+    _check_dir(direction)
     now_vn = now_vn or datetime.now(VN_TZ)
     today, session_open = now_vn.date(), now_vn.hour < 15
     start, end = pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize()
@@ -168,7 +201,8 @@ def volume_hits(df: pd.DataFrame, rs_map: dict, start, end, weekly: bool = False
         if len(v) <= VOL_WINDOWS[-1]:
             continue
         ma = [v.rolling(w).mean() for w in VOL_WINDOWS]
-        ok = (ma[0] < ma[1]) & (ma[1] < ma[2]) & (ma[2] < ma[3])
+        ok = ((ma[0] < ma[1]) & (ma[1] < ma[2]) & (ma[2] < ma[3])) if direction == "down" \
+            else ((ma[0] > ma[1]) & (ma[1] > ma[2]) & (ma[2] > ma[3]))
         day = ok.index.normalize()
         hit = ok.index[ok.values & (day >= start) & (day <= end)]
         if not len(hit):

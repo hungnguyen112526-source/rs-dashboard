@@ -1,4 +1,4 @@
-"""Chứng khoán sung rụng (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
+"""FinSight (Streamlit) — điểm vào. Chạy: streamlit run app.py"""
 import html
 import sys
 from datetime import datetime, timedelta
@@ -26,12 +26,12 @@ except ImportError:      # thiếu file giao dịch giả lập thì chỉ trang
     paper = paper_engine = None
 
 ASSETS = next((d for d in (ROOT / "assets", ROOT.parent / "assets") if d.is_dir()), ROOT / "assets")
-_FAVICON, _LOGO = ASSETS / "favicon-192.png", ASSETS / "logo.png"
+_FAVICON, _LOGO, _ICON = ASSETS / "favicon-192.png", ASSETS / "logo.png", ASSETS / "logo-160.png"
 # thiếu file ảnh thì dùng emoji / bỏ logo sidebar, không để app sập
-st.set_page_config(page_title="Chứng khoán sung rụng", page_icon=str(_FAVICON) if _FAVICON.is_file() else "📈",
+st.set_page_config(page_title="FinSight", page_icon=str(_FAVICON) if _FAVICON.is_file() else "📈",
                    layout="wide", initial_sidebar_state="auto")
 if _LOGO.is_file():
-    st.logo(str(_LOGO), size="large")
+    st.logo(str(_LOGO), size="large", icon_image=str(_ICON) if _ICON.is_file() else None)
 ui.apply_css()
 
 auth.ensure_admin()
@@ -110,19 +110,20 @@ def cached_rs(path_str: str, mtime: float, frame: str):
 
 
 @st.cache_data(ttl=600)
-def cached_vol(path_str: str, mtime: float, hour_bucket: str):
+def cached_vol(path_str: str, mtime: float, hour_bucket: str, direction: str = "down"):
     s, _ = load_all(path_str, mtime)
     scores, _ = cached_rs(path_str, mtime, "day")
     rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
-    return engine.volume_screen(s, rs_map)
+    return engine.volume_screen(s, rs_map, direction=direction)
 
 
 @st.cache_data(ttl=600)
-def cached_hits(path_str: str, mtime: float, start: str, end: str, weekly: bool, hour_bucket: str):
+def cached_hits(path_str: str, mtime: float, start: str, end: str, weekly: bool, hour_bucket: str,
+                direction: str = "down"):
     s, _ = load_all(path_str, mtime)
     scores, _ = cached_rs(path_str, mtime, "day")
     rs_map = dict(zip(scores["ticker"], scores["RS"])) if not scores.empty else {}
-    return engine.volume_hits(s, rs_map, start, end, weekly)
+    return engine.volume_hits(s, rs_map, start, end, weekly, direction=direction)
 
 
 # ---- Biểu đồ trong cửa sổ nổi ----
@@ -188,7 +189,13 @@ def table_with_select(frame_df: pd.DataFrame, key: str, display=None, column_con
 
 
 W = engine.VOL_WINDOWS
-TB_RULE = f"TB{W[0]} < TB{W[1]} < TB{W[2]}"
+
+
+def tb_rule(direction: str, full: bool = False) -> str:
+    """Chuỗi điều kiện KLGD: giảm dần dùng '<', tăng dần dùng '>' (full=True thêm mốc TB cuối)."""
+    op = "<" if direction == "down" else ">"
+    n = 4 if full else 3
+    return f" {op} ".join(f"TB{w}" for w in W[:n])
 
 
 # Cỡ bảng: (chiều cao tối đa px, độ cao dòng px). None = tự tính theo số dòng ("Toàn trang").
@@ -213,7 +220,7 @@ def frame_filters(with_near: bool = False, key: str = "f"):
     near = False
     if with_near:
         near = cols[1].toggle("Hiện cả mã gần đạt (3/4 mốc)", key=f"{key}_near",
-                              help=f"{TB_RULE} nhưng chưa < TB{W[3]}")
+                              help=f"{tb_rule('down')} nhưng chưa < TB{W[3]}")
     cols[-2].segmented_control("Cỡ bảng", list(TBL_SIZES), default="Vừa", key="tbl_size",
                                help="Phóng to bảng: tăng chiều cao và độ cao dòng để xem được nhiều mã hơn một lúc")
     q = cols[-1].text_input("Tìm kiếm", placeholder="🔍 Lọc theo mã hoặc ngành", key=f"{key}_q",
@@ -279,9 +286,17 @@ def page_rs():
 
 # ---------------------------------------------------------------------------
 def page_vol():
-    st.header("📉 Lọc cổ phiếu có khối lượng giao dịch giảm dần")
     now = datetime.now(engine.VN_TZ)
-    day_df, week_df, last_d, last_w = cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+    dir_ui = st.segmented_control("Xu hướng khối lượng", ["Giảm dần", "Tăng dần"], default="Giảm dần",
+                                  key="vol_dir", help="Giảm dần: khối lượng co hẹp (tích luỹ/đi ngang). "
+                                  "Tăng dần: khối lượng nở ra (dòng tiền đang vào).") or "Giảm dần"
+    direction = "up" if dir_ui == "Tăng dần" else "down"
+    word = "tăng dần" if direction == "up" else "giảm dần"
+    TB_RULE = tb_rule(direction)
+    TB_FULL = tb_rule(direction, full=True)
+    op = ">" if direction == "up" else "<"
+    st.header(f"{'📈' if direction == 'up' else '📉'} Lọc cổ phiếu có khối lượng giao dịch {word}")
+    day_df, week_df, last_d, last_w = cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}", direction)
 
     def _n(df, n):
         return int((df["Số mốc đạt"] == n).sum()) if len(df) else 0
@@ -289,18 +304,24 @@ def page_vol():
     ui.kpi_row([
         ("Mã đủ 4 mốc · Ngày", f"{_n(day_df, 4)}", f"Tính đến {last_d}" if last_d else None),
         ("Mã đủ 4 mốc · Tuần", f"{_n(week_df, 4)}", f"Tính đến {last_w}" if last_w else None),
-        ("Mã gần đạt (3/4) · Ngày", f"{_n(day_df, 3)}", f"{TB_RULE} nhưng chưa < TB{W[3]}"),
+        ("Mã gần đạt (3/4) · Ngày", f"{_n(day_df, 3)}", f"{TB_RULE} nhưng chưa {op} TB{W[3]}"),
         ("Dữ liệu đến", as_of, None),
     ])
 
+    if direction == "up":
+        meaning = ("tìm cổ phiếu có lượng khớp lệnh đang nở ra dần (khối lượng gần đây lớn hơn mức trung bình dài hơn, "
+                   "thường gặp khi dòng tiền bắt đầu vào)")
+        pct_note = "số càng dương thì khối lượng gần đây càng vượt mức trung bình dài hạn"
+    else:
+        meaning = "tìm cổ phiếu có lượng khớp lệnh đang co hẹp dần (thường gặp khi tích luỹ/đi ngang)"
+        pct_note = "số càng âm thì khối lượng càng cạn"
     with st.expander("📖 Bộ lọc này làm gì? Cách đọc kết quả"):
         st.markdown(
-            "- **Ý nghĩa:** tìm cổ phiếu có lượng khớp lệnh đang co hẹp dần (thường gặp khi tích luỹ/đi ngang). "
-            "Đây là công cụ sàng lọc, **không phải tín hiệu mua/bán**.\n"
-            f"- **Điều kiện:** KLGD trung bình {W[0]} < {W[1]} < {W[2]} < {W[3]} (phiên với khung Ngày, tuần với khung Tuần; "
+            f"- **Ý nghĩa:** {meaning}. Đây là công cụ sàng lọc, **không phải tín hiệu mua/bán**.\n"
+            f"- **Điều kiện:** KLGD trung bình {TB_FULL.replace('TB', '')} (phiên với khung Ngày, tuần với khung Tuần; "
             "KLGD tuần = tổng các phiên trong tuần kết thúc thứ Sáu).\n"
-            f"- **Số mốc đạt:** 4/4 = đạt đủ (mặc định hiển thị); 3/4 = mới đạt TB{W[0]}<TB{W[1]}<TB{W[2]}, chưa < TB{W[3]}.\n"
-            f"- **{engine.PCT_COL}:** càng đỏ đậm thì khối lượng càng cạn.\n"
+            f"- **Số mốc đạt:** 4/4 = đạt đủ (mặc định hiển thị); 3/4 = mới đạt {TB_RULE.replace(' ', '')}, chưa {op} TB{W[3]}.\n"
+            f"- **{engine.PCT_COL}:** {pct_note}.\n"
             "- **GTGD TB20 (tỷ):** giá trị giao dịch TB 20 phiên, chỉ để tham khảo thanh khoản — không dùng để lọc.\n"
             "- **Khoảng thời gian:** bảng liệt kê mọi mã từng đủ điều kiện ở ít nhất một phiên/tuần trong khoảng bạn chọn.\n"
             "- Phiên/tuần đang diễn ra không được tính."
@@ -313,18 +334,18 @@ def page_vol():
     with st.container(border=True, key="card_vol_table"):
         end_d = datetime.strptime(last, "%d/%m/%Y").date() if last else datetime.now(engine.VN_TZ).date()
         back = 90 if is_week else 30
-        st.caption(f"Chọn khoảng thời gian: trả về các mã **từng** đủ điều kiện ({TB_RULE} < TB{W[3]}) ở ít nhất một {unit} trong khoảng.")
+        st.caption(f"Chọn khoảng thời gian: trả về các mã **từng** đủ điều kiện ({TB_FULL}) ở ít nhất một {unit} trong khoảng.")
         rng = st.date_input("Khoảng thời gian", value=(end_d - timedelta(days=back), end_d),
                             min_value=stocks["date"].min().date(), max_value=end_d, format="DD/MM/YYYY",
                             key=f"vol_rng_{'w' if is_week else 'd'}")
         if not (isinstance(rng, (tuple, list)) and len(rng) == 2):
             st.info("Chọn đủ ngày bắt đầu và ngày kết thúc.")
             return
-        data = cached_hits(str(data_path), MTIME, str(rng[0]), str(rng[1]), is_week, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+        data = cached_hits(str(data_path), MTIME, str(rng[0]), str(rng[1]), is_week, f"{now:%Y-%m-%d}-{now.hour >= 15}", direction)
         if len(data):
             data = _match(data, q, "Ngành").reset_index(drop=True)
         if data.empty:
-            st.info("Không có mã nào từng đủ điều kiện trong khoảng này.")
+            st.info(f"Không có mã nào từng có khối lượng {word} trong khoảng này.")
             return
         st.caption(f"{len(data)} mã")
         pct = engine.PCT_COL + " (lần cuối)"
@@ -439,9 +460,9 @@ current_page.run()
 
 
 # ---- Khung chat AI nổi (bật/tắt bằng nút 💬 góc dưới phải) ----
-def _ai_volume():
+def _ai_volume(direction: str = "down"):
     now = datetime.now(engine.VN_TZ)
-    return cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}")
+    return cached_vol(str(data_path), MTIME, f"{now:%Y-%m-%d}-{now.hour >= 15}", direction)
 
 
 if ai_chat is not None:

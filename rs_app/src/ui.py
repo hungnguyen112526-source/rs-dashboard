@@ -201,7 +201,7 @@ def render_auth_portal():
     with st.container(border=True, key="card_auth"):
         st.markdown(
             f'<div class="auth-head"><div class="auth-logo">{_logo_html()}</div>'
-            '<div class="auth-title">CHỨNG KHOÁN SUNG RỤNG</div>'
+            '<div class="auth-title">FINSIGHT</div>'
             '<div class="auth-sub">Xếp hạng sức mạnh giá · Lọc khối lượng · Cổ phiếu Việt Nam</div></div>',
             unsafe_allow_html=True,
         )
@@ -406,27 +406,56 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
 # ---------------------------------------------------------------- Biểu đồ kiểu TradingView
 # TradingView Lightweight Charts v5.2.1 (Apache-2.0; giữ nguyên logo TradingView trên biểu đồ để ghi công).
 # Kéo = di chuyển · lăn chuột = zoom quanh con trỏ · kéo trên trục = co giãn · các ngăn dùng chung trục thời gian.
+# Mọi biểu đồ đều có thanh công cụ vẽ (nút to) và nút "Phóng to toàn trang": bản phóng to là một iframe thứ hai gắn vào <body>
+# của trang cha (nên không bị thẻ/khung cha cắt), dựng lại từ chính mã HTML này; nét vẽ chia sẻ qua localStorage.
 _LWC_VER = "5.2.1"
 _TV_HTML = """<!doctype html><meta charset="utf-8">
 <style>html,body{margin:0;height:100%;background:transparent;font:12px system-ui,sans-serif;overflow:hidden}
+body.fs{background:__BG__}
 #c{position:absolute;inset:0}
 #t{position:absolute;left:10px;top:6px;z-index:3;font-weight:600;color:__FG__;pointer-events:none}
 #o{position:absolute;left:10px;top:24px;right:90px;z-index:3;color:__FG__;font-size:11px;line-height:1.5;pointer-events:none}
-#r{position:absolute;right:62px;top:6px;z-index:3;border:1px solid __GRID__;background:transparent;color:__FG__;
-border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}
+#r,#x{position:absolute;right:62px;top:6px;z-index:5;border:1px solid __GRID__;background:rgba(128,128,128,.12);color:__FG__;
+border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer}
+#x{display:none;right:10px;background:rgba(220,38,38,.85);border-color:#dc2626;color:#fff;font-weight:600}
 #dv{position:absolute;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none}
-#tb{position:absolute;left:6px;top:52px;z-index:4;display:flex;flex-direction:column;gap:3px}
-#tb button{width:30px;height:26px;padding:0;border:1px solid __GRID__;background:rgba(128,128,128,.12);color:__FG__;border-radius:6px;font-size:12px;cursor:pointer}
-#tb button.on{background:rgba(41,98,255,.35);border-color:#2962ff}</style>
-<div id="c"></div><canvas id="dv"></canvas><div id="t"></div><div id="o"></div><div id="tb"></div><button id="r" title="Về mặc định">⟲ Reset</button>
+#tb{position:absolute;left:6px;top:50px;z-index:4;display:flex;flex-direction:column;gap:3px}
+#tb .fsonly{display:none}
+#tb button{position:relative;width:34px;height:34px;padding:0;border:1px solid __GRID__;background:rgba(128,128,128,.14);color:__FG__;
+border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#tb button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+#tb button:hover{background:rgba(128,128,128,.32)}
+#tb button.on{background:rgba(41,98,255,.42);border-color:#2962ff;color:#fff}
+#tb .sep{height:1px;background:__GRID__;margin:3px 5px}
+#tb button::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;
+background:#111827;color:#fff;font-size:12px;padding:4px 9px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .12s;z-index:9}
+#tb button:hover::after{opacity:1}
+#toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:9;background:#111827;color:#fff;padding:6px 12px;border-radius:8px;display:none}
+body.fs #c,body.fs #dv{left:66px;width:calc(100% - 66px)}
+body.fs #t{left:78px;top:10px;font-size:16px}
+body.fs #o{left:78px;top:36px;font-size:13px;right:200px}
+body.fs #tb{left:8px;top:12px;gap:6px}
+body.fs #tb .fsonly{display:flex}
+body.fs #tb button{width:48px;height:48px}
+body.fs #tb button svg{width:27px;height:27px}
+@media (max-height:760px){body.fs #tb{gap:4px}body.fs #tb button{width:40px;height:40px}body.fs #tb button svg{width:23px;height:23px}}
+@media (max-height:640px){body.fs #tb{gap:3px}body.fs #tb button{width:34px;height:34px}body.fs #tb button svg{width:20px;height:20px}}
+body.fs #r{right:112px;top:10px;font-size:13px;padding:5px 12px}
+body.fs #x{display:block;right:12px;top:10px;font-size:13px;padding:5px 12px}</style>
+<div id="c"></div><canvas id="dv"></canvas><div id="t"></div><div id="o"></div><div id="tb"></div><div id="toast"></div>
+<button id="r" title="Về mặc định">⟲ Reset</button><button id="x" title="Đóng (Esc)">✕ Đóng (Esc)</button>
 __LIB__
 <script>
+const FS = !!window.__FS;                       // true: đây là bản phóng to (cửa sổ phủ toàn trang)
+const PRISTINE = FS ? "" : "<!doctype html>" + document.documentElement.outerHTML;   // bản gốc, chụp trước khi vẽ biểu đồ
 const D = __DATA__, FG = "__FG__", GRID = "__GRID__", L = LightweightCharts, UP = "#16a34a", DN = "#dc2626";
+const BG = D.dark ? "#0e1117" : "#ffffff";
+if (FS) document.body.classList.add("fs");
 document.getElementById("t").textContent = D.title;
 const chart = L.createChart(document.getElementById("c"), {
   autoSize: true,
   layout: { background: { type: "solid", color: "transparent" }, textColor: FG, fontFamily: "system-ui, sans-serif",
-            panes: { separatorColor: GRID } },
+            fontSize: FS ? 14 : 12, panes: { separatorColor: GRID } },
   grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
   leftPriceScale: { visible: D.left, borderColor: GRID }, rightPriceScale: { borderColor: GRID },
   timeScale: { borderColor: GRID, rightOffset: 6, minBarSpacing: 0.4 },
@@ -446,6 +475,7 @@ D.panes.forEach((p, pi) => p.series.forEach(s => {
 }));
 const ps = chart.panes(); D.panes.forEach((p, i) => ps[i] && ps[i].setStretchFactor(p.weight || 1));
 chart.timeScale().fitContent();
+if (window.__RANGE) { try { chart.timeScale().setVisibleLogicalRange(window.__RANGE); } catch (e) {} }   // giữ đúng đoạn đang xem khi phóng to
 
 const fmtV = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n);
 const tkey = t => typeof t === "object" && t ? t.year + "-" + String(t.month).padStart(2, "0") + "-" + String(t.day).padStart(2, "0") : t;
@@ -465,17 +495,91 @@ function show(t) {
 const first = D.panes[0].series[0].data, lastT = first[first.length - 1].time; show(lastT);
 chart.subscribeCrosshairMove(p => { show(p.time ? tkey(p.time) : lastT); });
 document.getElementById("r").onclick = () => { chart.priceScale("right").applyOptions({ autoScale: true }); chart.timeScale().fitContent(); };
-// ---- Công cụ vẽ: thước đo, đường xu hướng, đường ngang, hộp, Fibonacci (chỉ hiện ở biểu đồ có nến)
+
+// ---- Biểu tượng + nút của thanh công cụ (nút to, có chú thích khi rê chuột)
+const ICONS = {
+  cur: '<path d="M5 3l14 7-6 2 4 7-3 1-4-7-5 4z"/>',
+  m: '<path d="M3 17L17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>',
+  t: '<circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M6.5 17.5L17.5 6.5"/>',
+  h: '<path d="M3 12h18"/><circle cx="12" cy="12" r="2"/>',
+  r: '<rect x="4" y="6" width="16" height="12" rx="1"/>',
+  f: '<path d="M3 5h18M3 10h18M3 15h18M3 20h18" opacity=".9"/><path d="M6 20L18 5" stroke-dasharray="2 2"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>',
+  del: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  zin: '<circle cx="11" cy="11" r="6"/><path d="M16 16l5 5M11 8v6M8 11h6"/>',
+  zout: '<circle cx="11" cy="11" r="6"/><path d="M16 16l5 5M8 11h6"/>',
+  fit: '<path d="M20 12a8 8 0 11-3-6.2"/><path d="M20 4v5h-5"/>',
+  full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  close: '<path d="M5 5l14 14M19 5L5 19"/>'
+};
+function mkBtn(tb, tip, icon, fn, cls) {
+  const b = document.createElement("button"); if (cls) b.className = cls; b.setAttribute("data-tip", tip); b.setAttribute("aria-label", tip);
+  b.innerHTML = '<svg viewBox="0 0 24 24">' + ICONS[icon] + "</svg>"; b.onclick = fn; tb.appendChild(b); return b;
+}
+function mkSep(tb, cls) { const d = document.createElement("div"); d.className = "sep" + (cls ? " " + cls : ""); tb.appendChild(d); }
+function toast(msg) {
+  const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block";
+  setTimeout(() => { t.style.display = "none"; }, 3500);
+}
+
+// ---- Phóng to: mở một cửa sổ phủ kín trang (gắn vào body của trang cha nên không bị khung/thẻ cha cắt)
+let ov = null, savedOverflow = "";
+function escParent(e) { if (e.key === "Escape") closeOv(); }
+function closeOv() {
+  if (!ov) return;
+  const P = window.parent;
+  try { if (P.document.fullscreenElement) P.document.exitFullscreen(); } catch (e) {}
+  try { ov.remove(); } catch (e) {}
+  ov = null;
+  try { P.document.body.style.overflow = savedOverflow; P.removeEventListener("keydown", escParent); P.__rsMax = null; } catch (e) {}
+  if (window.__reload) window.__reload();          // nét vẽ mới vẽ ở bản phóng to hiện lại ở bản nhỏ
+}
+function openMax() {
+  let P = null;
+  try { P = window.parent; void P.document.body; } catch (e) { P = null; }
+  if (!P || P === window) {                         // không chạm được trang cha: thử toàn màn hình thật của khung này
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => toast("Trình duyệt không cho phóng to biểu đồ này"));
+    else toast("Trình duyệt không cho phóng to biểu đồ này");
+    return;
+  }
+  if (ov) return;
+  let rg = null; try { rg = chart.timeScale().getVisibleLogicalRange(); } catch (e) {}
+  ov = P.document.createElement("iframe");
+  ov.setAttribute("allow", "fullscreen"); ov.setAttribute("allowfullscreen", ""); ov.title = D.title;
+  ov.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;border:0;z-index:2147483000;background:" + BG;
+  const flag = "<script>window.__FS=1;window.__RANGE=" + JSON.stringify(rg) + ";</" + "script>";
+  ov.srcdoc = PRISTINE.replace("<head>", "<head>" + flag);
+  ov.addEventListener("load", () => { try { ov.contentWindow.focus(); } catch (e) {} });
+  savedOverflow = P.document.body.style.overflow; P.document.body.style.overflow = "hidden";
+  P.document.body.appendChild(ov);
+  P.addEventListener("keydown", escParent); P.__rsMax = { close: closeOv };
+}
+function closeMax() {                                // gọi từ bản phóng to
+  try { const P = window.parent; if (P.__rsMax && P.__rsMax.close) { P.__rsMax.close(); return; } } catch (e) {}
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+}
+function toggleReal() {                              // toàn màn hình thật của trình duyệt (ẩn cả thanh địa chỉ)
+  try {
+    const P = window.parent;
+    if (P.document.fullscreenElement) P.document.exitFullscreen();
+    else window.frameElement.requestFullscreen().catch(() => toast("Trình duyệt không cho bật toàn màn hình thật"));
+  } catch (e) { toast("Trình duyệt không cho bật toàn màn hình thật"); }
+}
+document.getElementById("x").onclick = closeMax;
+window.addEventListener("pagehide", closeOv);
+
+// ---- Công cụ vẽ: thước đo, đường xu hướng, đường ngang, hộp, Fibonacci (mọi biểu đồ, kể cả biểu đồ đường)
 (function () {
   const tb = document.getElementById("tb");
   try {
-    if (!D.panes[0].series.some(s => s.type === "candle")) { tb.style.display = "none"; return; }
     const main = H[0][1], wrap = document.getElementById("c"), ts = chart.timeScale();
     const cv = document.getElementById("dv"), g = cv.getContext("2d");
     const BLUE = "#2962ff", UPA = "rgba(22,163,74,.16)", DNA = "rgba(220,38,38,.16)", BLA = "rgba(41,98,255,.12)";
     const times = first.map(x => x.time), key = "rsdraw:" + D.title;
     let shapes = [], ruler = null, pend = null, hover = null, tool = "";
-    try { shapes = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { shapes = []; }
+    const load = () => { try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { return []; } };
+    shapes = load();
     const save = () => { try { localStorage.setItem(key, JSON.stringify(shapes)); } catch (e) {} };
 
     const offX = () => { try { return D.left ? chart.priceScale("left").width() : 0; } catch (e) { return 0; } };
@@ -483,6 +587,7 @@ document.getElementById("r").onclick = () => { chart.priceScale("right").applyOp
     const X = l => ts.logicalToCoordinate(l), Y = p => main.priceToCoordinate(p);
     const fp = p => Math.abs(p) >= 1000 ? p.toFixed(0) : p.toFixed(2);
     const day = l => { const i = Math.round(l); return i >= 0 && i < times.length ? new Date(times[i] + "T00:00:00Z") : null; };
+    const fsz = FS ? 13 : 11;
 
     function pt(e) {
       const r = wrap.getBoundingClientRect(), x = e.clientX - r.left - offX(), y = e.clientY - r.top;
@@ -492,17 +597,17 @@ document.getElementById("r").onclick = () => { chart.priceScale("right").applyOp
     }
 
     function tag(lines, x, y, col) {
-      g.font = "11px system-ui, sans-serif";
-      const w = Math.max.apply(null, lines.map(s => g.measureText(s).width)) + 10, h = lines.length * 14 + 6;
+      g.font = fsz + "px system-ui, sans-serif";
+      const lh = fsz + 4, w = Math.max.apply(null, lines.map(s => g.measureText(s).width)) + 10, h = lines.length * lh + 6;
       x = Math.min(Math.max(x, 2), plotW() - w - 2); y = Math.min(Math.max(y, 2), plotH() - h - 2);
       g.fillStyle = col; g.fillRect(x, y, w, h); g.fillStyle = "#fff";
-      lines.forEach((s, i) => g.fillText(s, x + 5, y + 14 + i * 14 - 1));
+      lines.forEach((s, i) => g.fillText(s, x + 5, y + lh + i * lh - 4));
     }
 
     function drawShape(s, b) {
       const a = s.a, x1 = X(a.l), y1 = Y(a.p);
       if (x1 == null || y1 == null) return;
-      g.lineWidth = 1.5; g.setLineDash([]); g.strokeStyle = BLUE;
+      g.lineWidth = FS ? 2 : 1.5; g.setLineDash([]); g.strokeStyle = BLUE;
       if (s.t === "h") {
         g.setLineDash([5, 4]); g.beginPath(); g.moveTo(0, y1); g.lineTo(plotW(), y1); g.stroke(); g.setLineDash([]);
         tag([fp(a.p)], plotW() - 62, y1 - 10, BLUE); return;
@@ -528,7 +633,7 @@ document.getElementById("r").onclick = () => { chart.priceScale("right").applyOp
         [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].forEach(lv => {
           const p = b.p + (a.p - b.p) * lv, y = Y(p); if (y == null) return;
           g.globalAlpha = 0.85; g.beginPath(); g.moveTo(L0, y); g.lineTo(L1, y); g.stroke(); g.globalAlpha = 1;
-          g.fillStyle = BLUE; g.font = "11px system-ui, sans-serif"; g.fillText(lv + "  (" + fp(p) + ")", L1 + 4, y + 4);
+          g.fillStyle = BLUE; g.font = fsz + "px system-ui, sans-serif"; g.fillText(lv + "  (" + fp(p) + ")", L1 + 4, y + 4);
         });
       }
     }
@@ -542,28 +647,33 @@ document.getElementById("r").onclick = () => { chart.priceScale("right").applyOp
       shapes.forEach(s => drawShape(s));
       if (ruler) drawShape(ruler);
       if (pend && hover) drawShape(pend, hover);
-      else if (pend) { const x = X(pend.a.l), y = Y(pend.a.p); if (x != null && y != null) { g.fillStyle = BLUE; g.beginPath(); g.arc(x, y, 3.5, 0, 6.3); g.fill(); } }
+      else if (pend) { const x = X(pend.a.l), y = Y(pend.a.p); if (x != null && y != null) { g.fillStyle = BLUE; g.beginPath(); g.arc(x, y, 4.5, 0, 6.3); g.fill(); } }
       g.restore();
     }
     let raf = 0;
     const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; try { paint(); } catch (e) {} }); };
+    window.__reload = () => { shapes = load(); ruler = null; pend = null; redraw(); };
 
-    const BTN = [["", "↖", "Con trỏ (Esc)"], ["m", "📏", "Thước đo: bấm 2 điểm để đo % và số phiên"], ["t", "╱", "Đường xu hướng"],
-                 ["h", "─", "Đường ngang"], ["r", "▭", "Hộp chữ nhật"], ["f", "Fib", "Fibonacci thoái lui"]];
+    const TOOLS = [["", "cur", "Con trỏ (Esc)"], ["m", "m", "Thước đo: bấm 2 điểm để đo % và số phiên"],
+                   ["t", "t", "Đường xu hướng: bấm 2 điểm"], ["h", "h", "Đường ngang: bấm 1 điểm"],
+                   ["r", "r", "Hộp chữ nhật: bấm 2 góc"], ["f", "f", "Fibonacci thoái lui: bấm 2 điểm"]];
     const btns = {};
     function setTool(t) {
       tool = t; pend = null; hover = null; ruler = null;
       Object.keys(btns).forEach(k => btns[k].classList.toggle("on", k === t));
       wrap.style.cursor = t ? "crosshair" : ""; redraw();
     }
-    BTN.forEach(([k, txt, tip]) => {
-      const b = document.createElement("button"); b.textContent = txt; b.title = tip; b.onclick = () => setTool(k);
-      tb.appendChild(b); btns[k] = b;
-    });
-    const act = (txt, tip, fn) => { const b = document.createElement("button"); b.textContent = txt; b.title = tip; b.onclick = fn; tb.appendChild(b); };
-    act("↶", "Xoá nét vẽ gần nhất", () => { shapes.pop(); save(); redraw(); });
-    act("🗑", "Xoá tất cả nét vẽ", () => { shapes = []; ruler = null; pend = null; save(); redraw(); });
-    if (D.left) tb.style.left = "62px";
+    TOOLS.forEach(([k, ic, tip]) => { btns[k] = mkBtn(tb, tip, ic, () => setTool(k)); });
+    mkSep(tb);
+    mkBtn(tb, "Xoá nét vẽ gần nhất", "undo", () => { shapes.pop(); save(); redraw(); });
+    mkBtn(tb, "Xoá tất cả nét vẽ", "del", () => { shapes = []; ruler = null; pend = null; save(); redraw(); });
+    mkSep(tb, "fsonly");
+    const zoom = f => { const r = ts.getVisibleLogicalRange(); if (!r) return; const c = (r.from + r.to) / 2, h = (r.to - r.from) / 2 * f;
+      ts.setVisibleLogicalRange({ from: c - h, to: c + h }); redraw(); };
+    mkBtn(tb, "Phóng to biểu đồ (zoom +)", "zin", () => zoom(0.7), "fsonly");
+    mkBtn(tb, "Thu nhỏ biểu đồ (zoom −)", "zout", () => zoom(1.4), "fsonly");
+    mkBtn(tb, "Xem toàn bộ dữ liệu", "fit", () => { chart.priceScale("right").applyOptions({ autoScale: true }); ts.fitContent(); setTimeout(redraw, 80); }, "fsonly");
+    if (D.left && !FS) tb.style.left = "62px";
     btns[""].classList.add("on");
 
     let down = null;
@@ -580,11 +690,18 @@ document.getElementById("r").onclick = () => { chart.priceScale("right").applyOp
     wrap.addEventListener("mousemove", e => { if (tool && pend) hover = pt(e) || hover; redraw(); });
     wrap.addEventListener("wheel", redraw, { passive: true });
     window.addEventListener("mouseup", () => setTimeout(redraw, 0));
-    document.addEventListener("keydown", e => { if (e.key === "Escape") setTool(""); });
+    document.addEventListener("keydown", e => {
+      if (e.key !== "Escape") return;
+      if (tool) setTool(""); else if (FS) closeMax();           // Esc lần 1 bỏ công cụ, lần 2 thoát phóng to
+    });
     document.getElementById("r").addEventListener("click", () => setTimeout(redraw, 80));
     ts.subscribeVisibleLogicalRangeChange(redraw); chart.subscribeCrosshairMove(redraw);
     new ResizeObserver(redraw).observe(wrap); setInterval(redraw, 600); redraw();
-  } catch (err) { tb.style.display = "none"; }
+  } catch (err) { /* lỗi công cụ vẽ thì chỉ còn các nút bên dưới */ }
+  // ---- Nút phóng to / đóng ở cuối thanh công cụ
+  mkSep(tb);
+  if (!FS) mkBtn(tb, "Phóng to toàn trang (như TradingView)", "full", openMax);
+  else { mkBtn(tb, "Toàn màn hình thật của trình duyệt", "full", toggleReal); mkBtn(tb, "Đóng (Esc)", "close", closeMax); }
 })();
 </script>"""
 
@@ -648,7 +765,8 @@ def tv_chart(title: str, panes: list, height: int = 560) -> None:
     left = any(s.get("scale") == "left" for p in panes for s in p["series"])
     dark = getattr(st.context.theme, "type", None) == "dark"
     html = (_TV_HTML.replace("__LIB__", _lwc_script())
-            .replace("__DATA__", json.dumps({"title": title, "panes": panes, "left": left}, ensure_ascii=False))
+            .replace("__DATA__", json.dumps({"title": title, "panes": panes, "left": left, "dark": dark}, ensure_ascii=False))
+            .replace("__BG__", "#0e1117" if dark else "#ffffff")
             .replace("__FG__", "#d7dbe0" if dark else "#3b3a42").replace("__GRID__", "rgba(128,128,128,.22)"))
     if hasattr(st, "iframe"):          # components.v1.html đã bị Streamlit loại bỏ dần -> ưu tiên st.iframe
         st.iframe(html, height=height)

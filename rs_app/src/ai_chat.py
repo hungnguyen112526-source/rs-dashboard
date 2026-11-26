@@ -33,7 +33,7 @@ MAX_WAIT_SECONDS = 25          # chờ tối đa khi chạm trần số request/
 SIZES = {"s": (340, 280), "m": (420, 380), "l": (560, 460)}   # (rộng px, cao vùng tin nhắn px)
 SIZE_ORDER = ["s", "m", "l"]
 
-SYSTEM_PROMPT = """Bạn là trợ lý của web "Chứng khoán sung rụng" (bảng xếp hạng RS cổ phiếu Việt Nam). Trả lời bằng tiếng Việt, ngắn gọn, dễ đọc.
+SYSTEM_PROMPT = """Bạn là trợ lý của web "FinSight" (bảng xếp hạng RS cổ phiếu Việt Nam). Trả lời bằng tiếng Việt, ngắn gọn, dễ đọc.
 
 NGUYÊN TẮC DỮ LIỆU
 - CHỈ dùng số liệu lấy từ các công cụ (dữ liệu có sẵn trong web). Không dùng trí nhớ để nêu giá, chỉ số, kết quả kinh doanh hay tin tức. Câu hỏi về số liệu thì GỌI CÔNG CỤ trước, có thể gọi nhiều công cụ.
@@ -41,7 +41,7 @@ NGUYÊN TẮC DỮ LIỆU
 - Luôn nêu mốc ngày của dữ liệu (ngay_du_lieu / cap_nhat) khi đưa số liệu. Mã cổ phiếu viết HOA.
 - Đơn vị: giá tính bằng NGHÌN ĐỒNG (76.0 = 76.000đ); GTGD và BCTC tính bằng TỶ ĐỒNG.
 - RS (1-99) là xếp hạng sức mạnh giá tương đối: điểm thô = 0,4×%Δ khối gần nhất + 0,3 + 0,2 + 0,1 (khối 30 phiên cho khung ngày, 20 tuần cho khung tuần), rồi xếp hạng phần trăm. RS càng cao càng mạnh hơn phần còn lại của thị trường.
-- Bộ lọc KLGD giảm dần: TB10 < TB20 < TB30 (< TB50) — khối lượng co dần.
+- Bộ lọc KLGD giảm dần: TB10 < TB20 < TB30 (< TB50) — khối lượng co dần. Tăng dần là chiều ngược lại (TB10 > TB20 > TB30 > TB50) — khối lượng nở dần.
 - Bảng "chỉ số tài chính" gốc trong web có thể đã cũ; hãy dùng financial_summary (tự tính từ báo cáo quý).
 
 AN TOÀN
@@ -54,7 +54,7 @@ TRÌNH BÀY: ưu tiên 3-8 dòng; dùng bảng markdown nhỏ khi so sánh nhi�
 
 TOOL_LABELS = {
     "market_overview": "tổng quan thị trường", "industry_ranking": "xếp hạng ngành", "top_rs_stocks": "xếp hạng RS",
-    "volume_decline_screen": "bộ lọc KLGD giảm dần", "stock_overview": "tổng quan mã", "compare_stocks": "so sánh các mã",
+    "volume_decline_screen": "bộ lọc KLGD giảm/tăng dần", "stock_overview": "tổng quan mã", "compare_stocks": "so sánh các mã",
     "price_history": "lịch sử giá", "financial_summary": "kết quả kinh doanh", "get_financial_items": "báo cáo tài chính",
     "latest_news": "tin tức", "macro_snapshot": "số liệu vĩ mô", "bond_yields_snapshot": "lãi suất trái phiếu",
     "economic_calendar": "lịch kinh tế",

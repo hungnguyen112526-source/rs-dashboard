@@ -1842,7 +1842,7 @@ def main():
             .replace("%%VNINDEX_OHLC_JSON%%", vnindex_ohlc_json)
         )
         moneyflow_html = render_page(
-            page_title="Chỉ số dòng tiền — RS Dashboard",
+            page_title="Chỉ số dòng tiền — FinSight",
             h1="📊 Chỉ số dòng tiền",
             active_nav="moneyflow",
             has_moneyflow=has_moneyflow,
@@ -1936,7 +1936,7 @@ def main():
                 .replace("%%HAS_VOLUME_JSON%%", json.dumps(has_volume))
             )
         macro_html_out = render_page(
-            page_title="Dữ liệu vĩ mô — RS Dashboard",
+            page_title="Dữ liệu vĩ mô — FinSight",
             h1="🌐 Dữ liệu vĩ mô",
             active_nav="macro",
             has_moneyflow=has_moneyflow,
@@ -1989,7 +1989,7 @@ def main():
         financials_data_json = json.dumps(fin_tickers, ensure_ascii=False)
         financials_script = FINANCIALS_SCRIPT.replace("%%FIN_DATA_JSON%%", financials_data_json)
         financials_html_out = render_page(
-            page_title="Báo cáo tài chính — RS Dashboard",
+            page_title="Báo cáo tài chính — FinSight",
             h1="📑 Báo cáo tài chính",
             active_nav="financials",
             has_moneyflow=has_moneyflow,
@@ -2040,7 +2040,7 @@ def main():
         news_json = news_json.replace("</", "<\\/")
         news_script = NEWS_SCRIPT.replace("%%NEWS_DATA_JSON%%", news_json)
         news_html_out = render_page(
-            page_title="Tin tức — RS Dashboard",
+            page_title="Tin tức — FinSight",
             h1="📰 Tin tức tổng hợp",
             active_nav="news",
             has_moneyflow=has_moneyflow,
@@ -2117,7 +2117,7 @@ def main():
 """
         vol_overlay = ranking_extra[:ranking_extra.index('<div id="group-overlay"')]
         vol_html_out = render_page(
-            page_title="Lọc KLGD giảm dần — RS Dashboard",
+            page_title="Lọc KLGD giảm dần — FinSight",
             h1="📉 Lọc KLGD giảm dần",
             active_nav="volume",
             has_moneyflow=has_moneyflow,

@@ -441,3 +441,17 @@ def load_json(path: str, default=None):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def drop_non_sessions(df: pd.DataFrame, date_col: str = "date", ticker_col: str = "ticker",
+                      min_share: float = 0.1, window: int = 61) -> pd.DataFrame:
+    """Bỏ dòng thuộc ngày KHÔNG phải phiên giao dịch (cuối tuần, ngày chưa tới...) do nguồn TradingView cũ trả thừa
+    (ví dụ mã NAF). Giữ một ngày khi số mã có dữ liệu >= min_share so với trung vị ~window ngày quanh nó.
+    (Bản sao của engine.drop_non_sessions trong rs_app/src; hai bản phải giống nhau - có test so khớp.)"""
+    if df.empty:
+        return df
+    day = pd.to_datetime(df[date_col]).dt.normalize()
+    cnt = df.groupby(day)[ticker_col].nunique().sort_index()
+    ref = cnt.rolling(window, center=True, min_periods=1).median()
+    ok = cnt >= (ref * min_share).clip(lower=1.0)
+    return df[day.map(ok).fillna(False).to_numpy(dtype=bool)]

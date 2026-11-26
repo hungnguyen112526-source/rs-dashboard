@@ -9,7 +9,7 @@ HERO_CSS = """
 .home-hero { padding: .4rem 0 .2rem; }
 .home-kicker { font-weight: 800; letter-spacing: .08em; text-transform: uppercase; font-size: .78rem; opacity: .65; }
 .home-title { font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 900; letter-spacing: -.05em; line-height: 1.08; margin: .25rem 0 .6rem; }
-.home-title span { background: linear-gradient(90deg,#6A57F2,#2fa8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.home-title span { background: linear-gradient(90deg,#1fa97a,#2cc79a); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .home-lead { font-size: 1.08rem; line-height: 1.6; max-width: 46rem; opacity: .88; }
 .home-pill { display: inline-block; margin-top: .8rem; padding: .25rem .8rem; border-radius: 999px; font-size: .82rem; font-weight: 700;
              background: rgba(123,97,255,.14); }
@@ -27,7 +27,7 @@ HERO_CSS = """
 
 FEATURES = [
     ("rs", "🏆", "Xếp hạng RS", "Điểm sức mạnh giá 1–99 cho từng mã và từng ngành, xem theo ngày hoặc theo tuần."),
-    ("klgd", "📉", "Lọc KLGD", "Tìm các mã có khối lượng giao dịch co dần: TB10 < TB20 < TB30 (< TB50)."),
+    ("klgd", "📉", "Lọc KLGD", "Tìm các mã có khối lượng giao dịch co dần (TB10 < TB20 < TB30 < TB50) hoặc nở dần (ngược lại)."),
     ("dongtien", "📊", "Dòng tiền", "Chỉ số tổng hợp có trọng số dòng tiền cho cả thị trường và từng ngành."),
     ("theodoi", "⭐", "Theo dõi", "Lưu danh sách mã riêng của bạn kèm ghi chú, xem nhanh RS và biểu đồ."),
     ("bctc", "📑", "BCTC", "Doanh thu, lợi nhuận, cân đối kế toán và lưu chuyển tiền tệ theo quý."),
@@ -65,7 +65,7 @@ def render(user: dict, as_of: str, vnindex: pd.DataFrame, scores: pd.DataFrame, 
     st.html(f"""
     <div class="home-hero">
       <div class="home-kicker">Xin chào, {html.escape(str(name))}</div>
-      <div class="home-title">Chứng khoán <span>sung rụng</span></div>
+      <div class="home-title">Fin<span>Sight</span></div>
       <div class="home-lead">Bảng xếp hạng sức mạnh giá (RS) của cổ phiếu Việt Nam. Thay vì mở từng biểu đồ, bạn chỉ cần nhìn
       một bảng để biết mã nào, ngành nào đang mạnh hơn phần còn lại của thị trường — rồi đào sâu bằng khối lượng, dòng tiền,
       báo cáo tài chính, tin tức, vĩ mô và một trợ lý AI trả lời ngay trên dữ liệu của web.</div>

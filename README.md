@@ -1,5 +1,5 @@
-# rs-dashboard
-Dashboard xếp hạng RS chứng khoán (Streamlit, thư mục `rs_app/`), dữ liệu cập nhật tự động bằng GitHub Actions.
+# rs-dashboard (FinSight)
+FinSight: dashboard xếp hạng RS chứng khoán (Streamlit, thư mục `rs_app/`), dữ liệu cập nhật tự động bằng GitHub Actions.
 
 ## Dữ liệu và workflow (`.github/workflows/`)
 | Workflow | Việc làm | Lịch (giờ VN) |
@@ -30,3 +30,8 @@ Bảng `ratio` không còn lấy từ vnstock ở đây (xem phần đầu `fetc
   Khoá FHSC **hết hạn sau 30 ngày kể từ ngày tạo**: nhớ tạo lại và cập nhật Secret trước hạn.
 - `update_data_fhsc.yml`: `PRICE_SOURCE=vnstock` + `FULL_REFRESH=1` (không dùng TradingView), cần Secret `FHSC_API_KEY`.
 - `update_financials.yml`: lịch đang tắt; bấm chạy tay lần đầu và so sánh `financials_data.json` trước khi bật lịch.
+
+## Làm sạch dữ liệu giá
+`fetch_data.py` và app (`engine.load_prices`) tự bỏ các dòng thuộc ngày không phải phiên giao dịch (thứ Bảy, ngày lễ, ngày chưa tới)
+mà nguồn TradingView cũ từng trả thừa cho vài mã như NAF; các dòng này làm biểu đồ chỉ số dòng tiền bị cách ngày. Muốn dọn file CSV ngay
+trên máy: `python clean_price_csv.py` (chỉ báo cáo) hoặc `python clean_price_csv.py --write` (ghi đè, có bản `.bak`).
