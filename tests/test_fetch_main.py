@@ -34,5 +34,5 @@ def test_main_writes_csv_and_log_with_vnstock_only(tmp_path, monkeypatch):
     df = pd.read_csv("gia_lich_su_rs.csv")
     assert set(df["ticker"]) == {"AAA", "BBB", "VNINDEX"} and len(df) == 15
     log = fetch_data.load_json("price_source_log.json")
-    assert log["counts"] == {"vnstock": 3, "none": 0} and "tv" not in log["counts"]
-    assert not os.path.exists("tv_exchange_map.json")
+    assert log["counts"] == {"tv": 0, "vnstock": 3, "none": 0}
+    assert os.path.exists("tv_exchange_map.json")   # luôn ghi bảng sàn (rỗng khi không dùng TradingView)

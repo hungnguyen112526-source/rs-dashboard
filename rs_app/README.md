@@ -1,7 +1,7 @@
 # FinSight (Streamlit) — có đăng ký / đăng nhập
 
 Bản Streamlit của FinSight (dự án rs-dashboard). Đợt 1 gồm: cổng đăng ký/đăng nhập, trang **Xếp hạng RS** (ngày/tuần),
-trang **Lọc KLGD giảm dần**, và trang **Quản trị người dùng** (chỉ admin).
+trang **Lọc KLGD giảm dần / tăng dần**, và trang **Quản trị người dùng** (chỉ admin).
 (Bản trang tĩnh HTML/GitHub Pages cũ đã được gỡ bỏ.)
 
 ## Đặt vào repo
@@ -37,7 +37,7 @@ Muốn dữ liệu thật sự riêng tư phải để repo **private** (nay kh�
 
 ## Trợ lý AI (khung chat nổi, Gemini miễn phí)
 Sau khi đăng nhập, góc dưới bên phải có nút **💬 Hỏi AI**. Bấm để mở khung chat, bấm **✕** để thu gọn (↔️ đổi cỡ, 🗑️ xoá cuộc trò chuyện, ⚙️ nhập API key riêng).
-- AI chỉ trả lời dựa trên dữ liệu có trong web: giá/KLGD, RS cổ phiếu & ngành, bộ lọc KLGD giảm dần, BCTC, tin tức, vĩ mô, trái phiếu, lịch kinh tế
+- AI chỉ trả lời dựa trên dữ liệu có trong web: giá/KLGD, RS cổ phiếu & ngành, bộ lọc KLGD giảm dần / tăng dần, BCTC, tin tức, vĩ mô, trái phiếu, lịch kinh tế
   (các công cụ chỉ đọc nằm trong `src/ai_tools.py`). Không có công cụ ghi và không truy cập internet.
 - Cấu hình: thêm `GEMINI_API_KEY` (và tuỳ chọn `GEMINI_MODELS`, `AI_USER_PER_HOUR`, `AI_USER_PER_DAY`, `AI_GLOBAL_RPM`, `AI_GLOBAL_RPD`)
   vào Secrets — xem `.streamlit/secrets.toml.example`. Không có key chung thì mỗi người tự nhập key riêng ở ⚙️ (key chỉ lưu trong phiên, không ghi vào máy chủ).

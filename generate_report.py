@@ -268,29 +268,32 @@ def resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
     return weekly
 
 
-VOL_WINDOWS = [5, 10, 20, 40]
+VOL_WINDOWS = [10, 20, 30, 50]   # TB10, TB20, TB30, TB50 (phiên hoặc tuần) - trùng rs_app/src/engine.py
+VOL_DIRECTIONS = ("down", "up")
 VOL_MIN_NEAR_TIERS = 3
 VN_TZ_VOL = timezone(timedelta(hours=7))
 
 
-def _vol_chain_tiers(v):
-    """v: mảng KLGD (cũ -> mới). Trả về (ma5, ma10, ma20, ma40, số mốc đạt) hoặc None nếu thiếu dữ liệu.
-    Số mốc đạt = độ dài chuỗi giảm dần liên tiếp tính từ TB5: TB5<TB10 (2 mốc), <TB20 (3 mốc), <TB40 (4 mốc);
-    1 = không đạt cả TB5<TB10."""
+def _vol_chain_tiers(v, direction="down"):
+    """v: mảng KLGD (cũ -> mới). Trả về (ma10, ma20, ma30, ma50, số mốc đạt) hoặc None nếu thiếu dữ liệu.
+    direction="down": TB10<TB20<TB30<TB50 (khối lượng co dần); "up": TB10>TB20>TB30>TB50 (khối lượng nở dần).
+    Số mốc đạt = độ dài chuỗi liên tiếp tính từ TB10 (2, 3 hoặc 4 mốc); 1 = không đạt cả mốc đầu."""
+    if direction not in VOL_DIRECTIONS:
+        raise ValueError(f"direction phải là 'down' hoặc 'up', không phải {direction!r}")
     if len(v) < VOL_WINDOWS[-1]:
         return None
     mas = [float(np.mean(v[-w:])) for w in VOL_WINDOWS]
     tiers = 1
     for i in range(3):
-        if mas[i] < mas[i + 1]:
+        if (mas[i] < mas[i + 1]) if direction == "down" else (mas[i] > mas[i + 1]):
             tiers += 1
         else:
             break
     return mas, tiers
 
 
-def compute_volume_screen(df, rs_map, industry_map, now_vn=None):
-    """Lọc mã có KLGD giảm dần: TB5 < TB10 < TB20 < TB40 (phiên với khung ngày, tuần với khung tuần).
+def compute_volume_screen(df, rs_map, industry_map, now_vn=None, direction="down"):
+    """Lọc mã có KLGD giảm dần (TB10 < TB20 < TB30 < TB50) hoặc tăng dần (ngược lại); phiên với khung ngày, tuần với khung tuần.
     Loại phiên/tuần CHƯA KẾT THÚC khỏi tính toán (KLGD trong phiên chưa đủ). Không lọc thanh khoản;
     GTGD TB20 chỉ để tham khảo. Trả về dict hoặc None nếu thiếu cột volume."""
     if "volume" not in df.columns:
@@ -333,7 +336,7 @@ def compute_volume_screen(df, rs_map, industry_map, now_vn=None):
                 "r": rs,
             })
 
-        add("day", _vol_chain_tiers(vol))
+        add("day", _vol_chain_tiers(vol, direction))
 
         # --- khung tuần: tổng KLGD mỗi tuần (kết thúc thứ Sáu); bỏ tuần chưa kết thúc ---
         wk = g.set_index("date")["volume"].astype(float).resample("W-FRI").sum(min_count=1).dropna()
@@ -343,7 +346,7 @@ def compute_volume_screen(df, rs_map, industry_map, now_vn=None):
                 wk = wk.iloc[:-1]
         if len(wk):
             last_weeks.append(wk.index[-1])
-            add("week", _vol_chain_tiers(wk.values))
+            add("week", _vol_chain_tiers(wk.values, direction))
 
     if last_days:
         out["last_day"] = max(last_days).strftime("%d/%m/%Y")
@@ -437,6 +440,7 @@ details.formula-box .formula-list { margin-top:12px; }
 .vol-full { background:rgba(34,197,94,0.18); color:#4ade80; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
 .vol-near { background:rgba(250,204,21,0.15); color:#facc15; padding:2px 8px; border-radius:6px; font-weight:600; font-size:12px; }
 .vol-neg { color:#f87171; }
+.vol-pos { color:#4ade80; }
 .vol-opts { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:13px; color: var(--text-dim); }
 .vol-opts label { cursor:pointer; display:flex; align-items:center; gap:6px; }
 
@@ -1282,6 +1286,7 @@ let currentChartState = null;
 
 %%CHART_HELPERS%%
 
+let volDir = 'down';
 let volFrame = 'day';
 let volShowNear = false;
 let volSearch = '';
@@ -1303,7 +1308,7 @@ function volSortValue(r, key) {
 }
 
 function renderVolume() {
-  const rows = (VOL_DATA[volFrame] || []).filter(r => (volShowNear || r.n >= 4)
+  const rows = ((VOL_DATA[volDir] || {})[volFrame] || []).filter(r => (volShowNear || r.n >= 4)
     && (!volSearch || (r.t + ' ' + (r.i || '')).toLowerCase().includes(volSearch)));
   rows.sort((a, b) => {
     const x = volSortValue(a, volSortKey), y = volSortValue(b, volSortKey);
@@ -1312,8 +1317,8 @@ function renderVolume() {
     return a.t < b.t ? -1 : 1;
   });
   const unit = volFrame === 'day' ? 'phiên' : 'tuần';
-  const cols = [['t','Mã'],['i','Ngành'],['m0','TB5'],['m1','TB10'],['m2','TB20'],['m3','TB40'],
-                ['p','% TB5 so với TB40'],['n','Số mốc đạt'],['g','GTGD TB20 (tỷ)'],['r','RS']];
+  const cols = [['t','Mã'],['i','Ngành'],['m0','TB10'],['m1','TB20'],['m2','TB30'],['m3','TB50'],
+                ['p','% TB10 so với TB50'],['n','Số mốc đạt'],['g','GTGD TB20 (tỷ)'],['r','RS']];
   let h = '<div class="table-scroll"><table class="vol-table"><tr>';
   for (const [k, label] of cols) {
     const arrow = k === volSortKey ? (volSortDir === 1 ? ' ▲' : ' ▼') : '';
@@ -1327,7 +1332,7 @@ function renderVolume() {
       + '<td>' + escVol(r.i) + '</td>'
       + '<td>' + fmtVol(r.m[0]) + '</td><td>' + fmtVol(r.m[1]) + '</td>'
       + '<td>' + fmtVol(r.m[2]) + '</td><td>' + fmtVol(r.m[3]) + '</td>'
-      + '<td class="vol-neg">' + (r.p == null ? '-' : r.p.toFixed(1) + '%') + '</td>'
+      + '<td class="' + (volDir === 'up' ? 'vol-pos' : 'vol-neg') + '">' + (r.p == null ? '-' : r.p.toFixed(1) + '%') + '</td>'
       + '<td>' + tag + '</td>'
       + '<td>' + (r.g == null ? '-' : r.g.toLocaleString('vi-VN', {maximumFractionDigits: 1})) + '</td>'
       + '<td>' + (r.r == null ? '-' : r.r) + '</td></tr>';
@@ -1336,13 +1341,34 @@ function renderVolume() {
   if (!rows.length) h = '<div class="hint">Không có mã nào thỏa điều kiện.</div>';
   document.getElementById('vol-table-container').innerHTML = h;
   document.getElementById('vol-count').textContent = rows.length + ' mã';
-  const last = volFrame === 'day' ? VOL_DATA.last_day : VOL_DATA.last_week;
+  const last = volFrame === 'day' ? VOL_DATA[volDir].last_day : VOL_DATA[volDir].last_week;
+  updateVolLabels();
   document.getElementById('vol-asof').textContent = last
     ? ('Tính đến ' + unit + ' kết thúc ngày ' + last + ' (không tính ' + unit + ' đang diễn ra).') : '';
 }
 
 function volSort(k) {
-  if (volSortKey === k) volSortDir = -volSortDir; else { volSortKey = k; volSortDir = (k === 't' || k === 'i' || k === 'p') ? 1 : -1; }
+  if (volSortKey === k) volSortDir = -volSortDir; else { volSortKey = k; volSortDir = (k === 't' || k === 'i') ? 1 : (k === 'p' ? (volDir === 'down' ? 1 : -1) : -1); }
+  renderVolume();
+}
+
+function volFullCount(dir, frame) { return ((VOL_DATA[dir] || {})[frame] || []).filter(r => r.n >= 4).length; }
+
+function updateVolLabels() {
+  document.getElementById('vol-frame-day').textContent = 'Ngày (' + volFullCount(volDir, 'day') + ' mã đủ 4 mốc)';
+  document.getElementById('vol-frame-week').textContent = 'Tuần (' + volFullCount(volDir, 'week') + ' mã đủ 4 mốc)';
+  const op = volDir === 'down' ? '<' : '>';
+  document.getElementById('vol-near-label').textContent =
+    'Hiện cả mã gần đạt (3/4 mốc: TB10 ' + op + ' TB20 ' + op + ' TB30 nhưng chưa ' + op + ' TB50)';
+}
+
+// Đổi hướng lọc: giảm dần sắp theo % âm nhất trước, tăng dần sắp theo % dương nhất trước.
+function setVolDir(d, btn) {
+  volDir = d;
+  volSortKey = 'p';
+  volSortDir = d === 'down' ? 1 : -1;
+  document.querySelectorAll('.vol-dir-btn').forEach(b => b.classList.remove('tf-toggle-active'));
+  btn.classList.add('tf-toggle-active');
   renderVolume();
 }
 
@@ -1756,8 +1782,11 @@ def main():
 
     # Trang Lọc KLGD: tính sớm để biết có hiện mục nav hay không
     global HAS_VOLUME_PAGE
-    vol_screen = compute_volume_screen(df, scores.set_index("ticker")["RS"].to_dict(), industry_map.to_dict())
-    has_volume_page = bool(vol_screen) and bool(vol_screen["day"] or vol_screen["week"])
+    _rs_map, _ind_map = scores.set_index("ticker")["RS"].to_dict(), industry_map.to_dict()
+    vol_down = compute_volume_screen(df, _rs_map, _ind_map, direction="down")
+    vol_up = compute_volume_screen(df, _rs_map, _ind_map, direction="up")
+    vol_screen = {"down": vol_down, "up": vol_up} if vol_down and vol_up else None
+    has_volume_page = bool(vol_screen) and any(vol_screen[d][fr] for d in ("down", "up") for fr in ("day", "week"))
     HAS_VOLUME_PAGE = has_volume_page
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -2057,12 +2086,10 @@ def main():
         if os.path.exists(NEWS_FILE):
             os.remove(NEWS_FILE)
 
-    # ---------------- TRANG 6: volume.html (Lọc KLGD giảm dần) ----------------
+    # ---------------- TRANG 6: volume.html (Lọc KLGD giảm dần / tăng dần) ----------------
     if has_volume_page:
-        cand = {r["t"] for fr in ("day", "week") for r in vol_screen[fr]}
+        cand = {r["t"] for d in ("down", "up") for fr in ("day", "week") for r in vol_screen[d][fr]}
         vol_chart_data = {t: rows[-500:] for t, rows in chart_data.items() if t in cand}
-        n_day_full = sum(1 for r in vol_screen["day"] if r["n"] >= 4)
-        n_week_full = sum(1 for r in vol_screen["week"] if r["n"] >= 4)
         helpers = RANKING_SCRIPT[RANKING_SCRIPT.index("function getMonday"):RANKING_SCRIPT.index("function closeGroupPopup")]
         vol_script = (
             VOLUME_SCRIPT
@@ -2074,39 +2101,30 @@ def main():
         )
         vol_body = f"""
 <div class="card" id="section-volume">
-  <div class="section-title">📉 Lọc cổ phiếu có khối lượng giao dịch giảm dần</div>
+  <div class="section-title">📊 Lọc cổ phiếu có khối lượng giao dịch giảm dần / tăng dần</div>
   <details class="formula-box" open>
     <summary class="formula-title"><span class="formula-arrow">▶</span> ℹ️ Trang này lọc gì? Cách đọc kết quả — bấm để thu gọn/mở</summary>
     <ol class="formula-list">
-      <li><b>Ý tưởng:</b> tìm cổ phiếu mà <b>lượng giao dịch đang cạn dần</b> — nhà đầu tư bớt quan tâm, bán ra ít đi và cũng ít người mua. Thường gặp khi giá đi ngang tích lũy, hoặc khi nhịp giảm sắp hết lực bán. Đây chỉ là bộ lọc để <i>chọn mã đáng theo dõi</i>, không phải tín hiệu mua/bán.</li>
-      <li><b>Điều kiện (4 mốc):</b> KLGD trung bình của <b>5 &lt; 10 &lt; 20 &lt; 40</b> phiên gần nhất. Nghĩa là càng gần hiện tại, khối lượng trung bình càng thấp — khối lượng giảm dần liên tục theo thời gian.</li>
-      <li><b>Khung Ngày:</b> mỗi mốc là số <b>phiên</b>. <b>Khung Tuần:</b> mỗi mốc là số <b>tuần</b>, KLGD của một tuần = tổng KLGD các phiên trong tuần (tuần kết thúc thứ Sáu). Khung Tuần cho tín hiệu chậm hơn nhưng ít nhiễu hơn.</li>
-      <li><b>Số mốc đạt:</b> <span class="vol-full">4/4</span> = đạt đủ cả chuỗi TB5 &lt; TB10 &lt; TB20 &lt; TB40 (mặc định chỉ hiện nhóm này). <span class="vol-near">3/4</span> = mới giảm đến TB20 (TB5 &lt; TB10 &lt; TB20) nhưng TB20 chưa thấp hơn TB40 — "gần đạt", tích ô bên dưới để xem thêm.</li>
-      <li><b>% TB5 so với TB40:</b> KLGD 5 phiên/tuần gần nhất đang thấp hơn mức trung bình dài hạn bao nhiêu %. Số càng âm sâu thì khối lượng càng cạn.</li>
-      <li><b>GTGD TB20 (tỷ):</b> giá trị giao dịch trung bình 20 phiên (giá × khối lượng), tính theo tỷ đồng/phiên. Chỉ để tham khảo mức thanh khoản — <b>trang không lọc theo thanh khoản</b>, nên có mã thanh khoản rất thấp (khó mua bán) cũng xuất hiện; hãy xem cột này trước khi quan tâm một mã. <b>RS</b> là điểm sức mạnh giá (1–99) từ trang Xếp hạng, giúp phân biệt mã khối lượng cạn khi giá còn mạnh với mã đang yếu.</li>
-      <li><b>Lưu ý:</b> phiên/tuần đang diễn ra bị loại khỏi phép tính (khối lượng chưa đủ), nên dòng "Tính đến…" cho biết mốc dữ liệu cuối cùng. Khối lượng giảm không đồng nghĩa giá sẽ tăng — nên kết hợp với xu hướng giá trên biểu đồ (bấm vào mã) và các trang khác.</li>
+      <li><b>Giảm dần:</b> khối lượng giao dịch đang <b>cạn dần</b> — người mua/bán thưa đi, cổ phiếu "im ắng" hơn. Thường gặp khi giá đi ngang tích lũy hoặc nhịp giảm sắp hết lực bán. Điều kiện: KLGD trung bình <b>TB10 &lt; TB20 &lt; TB30 &lt; TB50</b>.</li>
+      <li><b>Tăng dần:</b> khối lượng đang <b>nở dần</b> — dòng tiền quan tâm nhiều hơn trước. Điều kiện ngược lại: <b>TB10 &gt; TB20 &gt; TB30 &gt; TB50</b>. Dùng nút <b>Giảm dần / Tăng dần</b> bên dưới để chuyển (mặc định là giảm dần).</li>
+      <li><b>Khung Ngày:</b> mỗi mốc là số <b>phiên</b> (TB10 là trung bình 10 phiên gần nhất, v.v.). <b>Khung Tuần:</b> mỗi mốc là số <b>tuần</b>, KLGD một tuần = tổng KLGD các phiên trong tuần (kết thúc thứ Sáu); tín hiệu chậm hơn nhưng ít nhiễu hơn.</li>
+      <li><b>Số mốc đạt:</b> <span class="vol-full">4/4</span> = đạt đủ cả chuỗi (mặc định chỉ hiện nhóm này). <span class="vol-near">3/4</span> = mới đạt đến TB30 nhưng chưa đạt TB50 — "gần đạt", tích ô bên dưới để xem thêm.</li>
+      <li><b>% TB10 so với TB50:</b> khối lượng gần đây lệch so với mức nền dài hạn bao nhiêu %. Giảm dần thì số <b>âm</b> (càng âm khối lượng càng cạn); tăng dần thì số <b>dương</b> (càng dương khối lượng càng nở).</li>
+      <li><b>GTGD TB20 (tỷ):</b> giá trị giao dịch trung bình 20 phiên (giá × khối lượng), tính theo tỷ đồng/phiên. Chỉ để tham khảo thanh khoản — <b>trang không lọc theo thanh khoản</b>, nên có mã thanh khoản rất thấp cũng xuất hiện. <b>RS</b> là điểm sức mạnh giá (1–99) từ trang Xếp hạng.</li>
+      <li><b>Lưu ý:</b> phiên/tuần đang diễn ra bị loại khỏi phép tính (khối lượng chưa đủ), nên dòng "Tính đến…" cho biết mốc dữ liệu cuối cùng. Khối lượng thay đổi không đồng nghĩa giá sẽ tăng hay giảm — đây chỉ là bộ lọc để chọn mã đáng theo dõi, không phải tín hiệu mua/bán; nên xem thêm biểu đồ (bấm vào mã).</li>
     </ol>
   </details>
   <div class="hint" id="vol-asof"></div>
-  <details class="formula-box">
-    <summary class="formula-title"><span class="formula-arrow">▶</span> 📖 Bộ lọc này làm gì? Cách đọc kết quả — bấm để xem</summary>
-    <ol class="formula-list">
-      <li><b>Ý nghĩa:</b> tìm cổ phiếu mà lượng khớp lệnh đang <b>co hẹp dần</b> — người mua/bán thưa dần, cổ phiếu "im ắng" hơn so với trước. Thường dùng để phát hiện giai đoạn tích luỹ/đi ngang, cạn cung hoặc chờ một nhịp bứt phá. Đây chỉ là công cụ sàng lọc ban đầu, <b>không phải tín hiệu mua/bán</b>.</li>
-      <li><b>Điều kiện:</b> KLGD trung bình 5 &lt; 10 &lt; 20 &lt; 40 (TB5 là trung bình 5 phiên gần nhất, v.v.). Nghĩa là càng gần hiện tại, khối lượng trung bình càng thấp.</li>
-      <li><b>Khung Ngày / Tuần:</b> khung Ngày tính theo phiên (phản ánh xu hướng ngắn hạn); khung Tuần tính theo tuần (KLGD tuần = tổng các phiên trong tuần, ít nhiễu hơn, phản ánh xu hướng trung hạn).</li>
-      <li><b>Số mốc đạt:</b> <span class="vol-full">4/4</span> = TB5 &lt; TB10 &lt; TB20 &lt; TB40 (đạt đủ, mặc định hiển thị). <span class="vol-near">3/4</span> = mới đạt TB5 &lt; TB10 &lt; TB20, chưa &lt; TB40 (gần đạt, tích ô bên dưới để hiện).</li>
-      <li><b>% TB5 so với TB40:</b> khối lượng gần đây đang thấp hơn mức nền dài hạn bao nhiêu phần trăm. Số càng âm → khối lượng càng cạn.</li>
-      <li><b>GTGD TB20 (tỷ):</b> giá trị giao dịch trung bình 20 phiên (giá × KLGD), tính bằng tỷ đồng/phiên. Chỉ để tham khảo thanh khoản, <b>không dùng để lọc</b> — mã thanh khoản thấp có thể xuất hiện trong danh sách, nên xem cột này trước khi quan tâm.</li>
-      <li><b>RS:</b> điểm sức mạnh giá (1–99) từ trang Xếp hạng. Kết hợp với bộ lọc: mã RS cao mà khối lượng cạn dần thường là mã đang nghỉ trong xu hướng tăng; mã RS thấp thì khối lượng cạn có thể chỉ là mất dòng tiền.</li>
-      <li><b>Lưu ý:</b> phiên/tuần đang diễn ra không được tính (khối lượng chưa đủ). Khối lượng thấp không đồng nghĩa giá sẽ tăng hay giảm — nên kết hợp xem biểu đồ (bấm vào mã) và các yếu tố khác.</li>
-    </ol>
-  </details>
   <div class="tf-toggle-row">
-    <button class="tf-toggle-btn vol-frame-btn tf-toggle-active" onclick="setVolFrame('day', this)">Ngày ({n_day_full} mã đủ 4 mốc)</button>
-    <button class="tf-toggle-btn vol-frame-btn" onclick="setVolFrame('week', this)">Tuần ({n_week_full} mã đủ 4 mốc)</button>
+    <button class="tf-toggle-btn vol-dir-btn tf-toggle-active" id="vol-dir-down" onclick="setVolDir('down', this)">📉 Giảm dần</button>
+    <button class="tf-toggle-btn vol-dir-btn" id="vol-dir-up" onclick="setVolDir('up', this)">📈 Tăng dần</button>
+  </div>
+  <div class="tf-toggle-row">
+    <button class="tf-toggle-btn vol-frame-btn tf-toggle-active" id="vol-frame-day" onclick="setVolFrame('day', this)">Ngày</button>
+    <button class="tf-toggle-btn vol-frame-btn" id="vol-frame-week" onclick="setVolFrame('week', this)">Tuần</button>
   </div>
   <div class="vol-opts">
-    <label><input type="checkbox" id="vol-near"> Hiện cả mã gần đạt (3/4 mốc: TB5 &lt; TB10 &lt; TB20 nhưng chưa &lt; TB40)</label>
+    <label><input type="checkbox" id="vol-near"> <span id="vol-near-label"></span></label>
   </div>
   <div class="table-toolbar">
     <input type="text" id="vol-search" class="search-box" placeholder="🔍 Lọc theo mã hoặc ngành...">
@@ -2117,8 +2135,8 @@ def main():
 """
         vol_overlay = ranking_extra[:ranking_extra.index('<div id="group-overlay"')]
         vol_html_out = render_page(
-            page_title="Lọc KLGD giảm dần — FinSight",
-            h1="📉 Lọc KLGD giảm dần",
+            page_title="Lọc KLGD giảm dần / tăng dần — FinSight",
+            h1="📊 Lọc KLGD giảm dần / tăng dần",
             active_nav="volume",
             has_moneyflow=has_moneyflow,
             has_macro=has_macro,

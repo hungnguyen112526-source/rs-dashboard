@@ -105,3 +105,35 @@ def test_volume_screen_and_hits_follow_direction():
     start, end = "2026-10-01", "2026-11-20"
     assert list(engine.volume_hits(df, rs, start, end, False, NOW, direction="up")["Mã"]) == ["UP"]
     assert list(engine.volume_hits(df, rs, start, end, False, NOW)["Mã"]) == ["DN"]       # mặc định = giảm dần
+
+
+# ---- báo cáo tĩnh (generate_report.py): cùng mốc 10/20/30/50 và cùng hướng lọc với app ----
+import generate_report as gr  # noqa: E402
+
+
+def test_report_windows_match_app():
+    assert gr.VOL_WINDOWS == engine.VOL_WINDOWS == [10, 20, 30, 50]
+
+
+def test_report_chain_directions_match_engine():
+    shrinking = np.linspace(2000, 100, 60)
+    growing = shrinking[::-1].copy()
+    for v, d in ((shrinking, "down"), (growing, "up"), (shrinking, "up"), (growing, "down")):
+        assert gr._vol_chain_tiers(v, d)[1] == engine._chain(v, d)[1]
+    mas, tiers = gr._vol_chain_tiers(growing, "up")
+    assert tiers == 4 and mas[0] > mas[1] > mas[2] > mas[3]
+    assert gr._vol_chain_tiers(shrinking[:30], "down") is None          # thiếu dữ liệu cho TB50
+    with pytest.raises(ValueError):
+        gr._vol_chain_tiers(growing, "sideways")
+
+
+def test_report_compute_volume_screen_follows_direction():
+    up = _vol_df(np.linspace(100, 2000, 70), "UP")
+    down = _vol_df(np.linspace(2000, 100, 70), "DN")
+    df = pd.concat([up, down], ignore_index=True)
+    rs = {"UP": 80, "DN": 70}
+    d = gr.compute_volume_screen(df, rs, {}, now_vn=NOW)                  # mặc định = giảm dần
+    u = gr.compute_volume_screen(df, rs, {}, now_vn=NOW, direction="up")
+    assert [r["t"] for r in d["day"] if r["n"] >= 4] == ["DN"]
+    assert [r["t"] for r in u["day"] if r["n"] >= 4] == ["UP"]
+    assert u["day"][0]["p"] > 0 > d["day"][0]["p"]                        # tăng dần: % TB10 so với TB50 dương
