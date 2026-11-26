@@ -415,9 +415,8 @@ body.fs{background:__BG__}
 #c{position:absolute;inset:0}
 #t{position:absolute;left:10px;top:6px;z-index:3;font-weight:600;color:__FG__;pointer-events:none}
 #o{position:absolute;left:10px;top:24px;right:90px;z-index:3;color:__FG__;font-size:11px;line-height:1.5;pointer-events:none}
-#r,#x{position:absolute;right:62px;top:6px;z-index:5;border:1px solid __GRID__;background:rgba(128,128,128,.12);color:__FG__;
+#r{position:absolute;right:62px;top:6px;z-index:5;border:1px solid __GRID__;background:rgba(128,128,128,.12);color:__FG__;
 border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer}
-#x{display:none;right:10px;background:rgba(220,38,38,.85);border-color:#dc2626;color:#fff;font-weight:600}
 #dv{position:absolute;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none}
 #tb{position:absolute;left:6px;top:50px;z-index:4;display:flex;flex-direction:column;gap:3px}
 #tb .fsonly{display:none}
@@ -430,6 +429,7 @@ border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content
 #tb button::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;
 background:#111827;color:#fff;font-size:12px;padding:4px 9px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .12s;z-index:9}
 #tb button:hover::after{opacity:1}
+#tb button:not([data-tip])::after{display:none}
 #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:9;background:#111827;color:#fff;padding:6px 12px;border-radius:8px;display:none}
 body.fs #c,body.fs #dv{left:66px;width:calc(100% - 66px)}
 body.fs #t{left:78px;top:10px;font-size:16px}
@@ -440,10 +440,9 @@ body.fs #tb button{width:48px;height:48px}
 body.fs #tb button svg{width:27px;height:27px}
 @media (max-height:760px){body.fs #tb{gap:4px}body.fs #tb button{width:40px;height:40px}body.fs #tb button svg{width:23px;height:23px}}
 @media (max-height:640px){body.fs #tb{gap:3px}body.fs #tb button{width:34px;height:34px}body.fs #tb button svg{width:20px;height:20px}}
-body.fs #r{right:112px;top:10px;font-size:13px;padding:5px 12px}
-body.fs #x{display:block;right:12px;top:10px;font-size:13px;padding:5px 12px}</style>
+body.fs #r{display:none}</style>
 <div id="c"></div><canvas id="dv"></canvas><div id="t"></div><div id="o"></div><div id="tb"></div><div id="toast"></div>
-<button id="r" title="Về mặc định">⟲ Reset</button><button id="x" title="Đóng (Esc)">✕ Đóng (Esc)</button>
+<button id="r" title="Về mặc định">⟲ Reset</button>
 __LIB__
 <script>
 const FS = !!window.__FS;                       // true: đây là bản phóng to (cửa sổ phủ toàn trang)
@@ -512,8 +511,8 @@ const ICONS = {
   full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   close: '<path d="M5 5l14 14M19 5L5 19"/>'
 };
-function mkBtn(tb, tip, icon, fn, cls) {
-  const b = document.createElement("button"); if (cls) b.className = cls; b.setAttribute("data-tip", tip); b.setAttribute("aria-label", tip);
+function mkBtn(tb, tip, icon, fn, cls, aria) {     // tip rỗng = nút chỉ có biểu tượng, không hiện chữ khi rê chuột
+  const b = document.createElement("button"); if (cls) b.className = cls; if (tip) b.setAttribute("data-tip", tip); b.setAttribute("aria-label", tip || aria || "");
   b.innerHTML = '<svg viewBox="0 0 24 24">' + ICONS[icon] + "</svg>"; b.onclick = fn; tb.appendChild(b); return b;
 }
 function mkSep(tb, cls) { const d = document.createElement("div"); d.className = "sep" + (cls ? " " + cls : ""); tb.appendChild(d); }
@@ -523,14 +522,14 @@ function toast(msg) {
 }
 
 // ---- Phóng to: mở một cửa sổ phủ kín trang (gắn vào body của trang cha nên không bị khung/thẻ cha cắt)
-let ov = null, savedOverflow = "";
+let ov = null, savedOverflow = "", ovFix = 0;
 function escParent(e) { if (e.key === "Escape") closeOv(); }
 function closeOv() {
   if (!ov) return;
   const P = window.parent;
   try { if (P.document.fullscreenElement) P.document.exitFullscreen(); } catch (e) {}
   try { ov.remove(); } catch (e) {}
-  ov = null;
+  ov = null; clearInterval(ovFix);
   try { P.document.body.style.overflow = savedOverflow; P.removeEventListener("keydown", escParent); P.__rsMax = null; } catch (e) {}
   if (window.__reload) window.__reload();          // nét vẽ mới vẽ ở bản phóng to hiện lại ở bản nhỏ
 }
@@ -552,7 +551,23 @@ function openMax() {
   ov.srcdoc = PRISTINE.replace("<head>", "<head>" + flag);
   ov.addEventListener("load", () => { try { ov.contentWindow.focus(); } catch (e) {} });
   savedOverflow = P.document.body.style.overflow; P.document.body.style.overflow = "hidden";
-  P.document.body.appendChild(ov);
+  // Biểu đồ mở trong st.dialog: Streamlit đặt mọi phần tử ngoài hộp thoại ở trạng thái "inert" (không nhận chuột/phím) và
+  // hộp thoại đóng khi bấm ra ngoài -> gắn bản phóng to vào CHÍNH hộp thoại để vẫn thao tác được.
+  let host = P.document.body;
+  try { const dlg = P.document.querySelector('[role="dialog"]'); if (dlg) host = dlg; } catch (e) {}
+  ov.inert = false;
+  host.appendChild(ov);
+  if (host !== P.document.body) {                   // hộp thoại có thể dịch chuyển/cắt nội dung: đặt lại khung cho phủ đúng cả màn hình
+    const fix = () => {
+      try {
+        ov.inert = false;
+        const r = host.getBoundingClientRect(), cs = P.getComputedStyle(host);
+        const moved = cs.transform !== "none" || cs.filter !== "none" || cs.perspective !== "none" || /paint|layout|strict|content/.test(cs.contain || "");
+        if (moved) { ov.style.left = (-r.left) + "px"; ov.style.top = (-r.top) + "px"; ov.style.width = P.innerWidth + "px"; ov.style.height = P.innerHeight + "px"; }
+      } catch (e) {}
+    };
+    fix(); ovFix = setInterval(fix, 300);
+  }
   P.addEventListener("keydown", escParent); P.__rsMax = { close: closeOv };
 }
 function closeMax() {                                // gọi từ bản phóng to
@@ -566,7 +581,6 @@ function toggleReal() {                              // toàn màn hình thật 
     else window.frameElement.requestFullscreen().catch(() => toast("Trình duyệt không cho bật toàn màn hình thật"));
   } catch (e) { toast("Trình duyệt không cho bật toàn màn hình thật"); }
 }
-document.getElementById("x").onclick = closeMax;
 window.addEventListener("pagehide", closeOv);
 
 // ---- Công cụ vẽ: thước đo, đường xu hướng, đường ngang, hộp, Fibonacci (mọi biểu đồ, kể cả biểu đồ đường)
@@ -700,8 +714,8 @@ window.addEventListener("pagehide", closeOv);
   } catch (err) { /* lỗi công cụ vẽ thì chỉ còn các nút bên dưới */ }
   // ---- Nút phóng to / đóng ở cuối thanh công cụ
   mkSep(tb);
-  if (!FS) mkBtn(tb, "Phóng to toàn trang (như TradingView)", "full", openMax);
-  else { mkBtn(tb, "Toàn màn hình thật của trình duyệt", "full", toggleReal); mkBtn(tb, "Đóng (Esc)", "close", closeMax); }
+  if (!FS) mkBtn(tb, "", "full", openMax, "", "Toàn màn hình");
+  else { mkBtn(tb, "", "full", toggleReal, "", "Toàn màn hình thật"); mkBtn(tb, "", "close", closeMax, "", "Đóng"); }
 })();
 </script>"""
 
