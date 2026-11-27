@@ -361,24 +361,25 @@ def compute_volume_screen(df, rs_map, industry_map, now_vn=None, direction="down
 
 SHARED_CSS = """
 :root {
-  --bg: #0a0f1e;
-  --card: #121b30;
-  --card-alt: #0f1728;
-  --border: #22304a;
-  --text: #e6eaf3;
-  --text-dim: #93a1bd;
-  --text-mute: #5b6780;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
+  --bg: #0b1220;
+  --card: #111a2c;
+  --card-alt: #0d1626;
+  --border: #23324d;
+  --text: #e8edf5;
+  --text-dim: #9aa9c4;
+  --text-mute: #62718c;
+  --accent: #3d74d1;
+  --accent-hover: #2f5daa;
+  --brand: #1fa97a;
   --green: #22c55e;
   --amber: #f59e0b;
   --red: #ef4444;
-  --radius: 14px;
+  --radius: 12px;
 }
 * { box-sizing: border-box; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  background: radial-gradient(circle at top, #101a30 0%, #0a0f1e 55%);
+  background: var(--bg);
   color: var(--text);
   margin: 0;
   padding: 24px;
@@ -404,7 +405,7 @@ h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
 .page-nav-top { color: var(--text-dim); text-decoration:none; font-size:16px; padding: 4px 8px; }
 .page-nav-item {
   color: var(--text-dim); text-decoration:none; font-size:13.5px; font-weight:600;
-  background: var(--card); padding:7px 14px; border-radius:999px; border:1px solid var(--border);
+  background: var(--card); padding:7px 14px; border-radius:10px; border:1px solid var(--border);
   white-space:nowrap; transition: all .15s;
 }
 .page-nav-item:hover { background: var(--card-alt); color: var(--text); border-color: var(--accent); }
@@ -412,9 +413,9 @@ h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
 
 .card { background: var(--card); border:1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 22px; }
 
-.group-links-row { color:#93c5fd; font-size:13px; margin: 0 0 18px; }
+.group-links-row { color:#9dbaeb; font-size:13px; margin: 0 0 18px; }
 .group-link { cursor:pointer; text-decoration:underline dotted; }
-.group-link:hover { color:#bfdbfe; }
+.group-link:hover { color:#c3d5f2; }
 
 .tf-toggle-row { display:flex; gap:8px; margin: 4px 0 20px; }
 .tf-toggle-btn {
@@ -456,9 +457,9 @@ th:first-child, td:first-child { position: sticky; left:0; background: var(--car
 th:first-child { z-index:3; }
 .stock-row { cursor: pointer; }
 .stock-row:hover td { background: var(--border); }
-.ticker-cell { font-weight:700; color:#60a5fa; text-decoration: underline; text-decoration-style: dotted; }
-.group-cell { cursor:pointer; color:#93c5fd; text-decoration: underline; text-decoration-style: dotted; }
-.group-cell:hover { color:#bfdbfe; }
+.ticker-cell { font-weight:700; color:#6c9be8; text-decoration: underline; text-decoration-style: dotted; }
+.group-cell { cursor:pointer; color:#9dbaeb; text-decoration: underline; text-decoration-style: dotted; }
+.group-cell:hover { color:#c3d5f2; }
 .section-title { font-size: 17px; margin: 0 0 4px; font-weight:700; }
 .hint { color: var(--text-mute); font-size: 12px; margin: 0 0 14px; }
 
@@ -490,7 +491,7 @@ th:first-child { z-index:3; }
 .subtabs { display:flex; gap:8px; margin: 4px 0 14px; border-bottom:1px solid var(--border); }
 .subtab-btn { background:transparent; border:none; border-bottom:2px solid transparent; color: var(--text-dim); font-size:15px; font-weight:600; padding:8px 4px; cursor:pointer; margin-bottom:-1px; }
 .subtab-btn:hover { color: var(--text); }
-.subtab-active { color:#60a5fa; border-bottom-color:#60a5fa; }
+.subtab-active { color:#6c9be8; border-bottom-color:var(--brand); }
 
 .table-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:4px 0 12px; }
 .search-box { background: var(--card-alt); color: var(--text); border:1px solid var(--border); border-radius:10px; padding:9px 12px; font-size:14px; flex:1; min-width:180px; max-width:320px; }
@@ -506,11 +507,11 @@ th:first-child { z-index:3; }
 .news-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
 .news-item { background: var(--card-alt); border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
 .news-title { color: var(--text); font-weight:600; font-size:14.5px; text-decoration:none; line-height:1.4; display:block; }
-.news-title:hover { color:#60a5fa; text-decoration:underline; }
+.news-title:hover { color:#6c9be8; text-decoration:underline; }
 .news-meta { color: var(--text-mute); font-size:12px; margin-top:7px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .news-source { font-weight:600; color: var(--text-dim); }
 .news-summary { color: var(--text-dim); font-size:13px; margin-top:7px; line-height:1.5; }
-.news-tag { background: var(--border); color:#93c5fd; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
+.news-tag { background: var(--border); color:#9dbaeb; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
 .news-empty { color: var(--text-mute); font-size:13px; padding:14px 0; }
 .news-count { color: var(--text-mute); font-size:12px; margin:4px 0 2px; }
 
@@ -683,7 +684,7 @@ function buildPriceChart(container, data, height) {
       );
     }
   } else {
-    const series = chart.addLineSeries({ color: '#60a5fa', lineWidth: 2 });
+    const series = chart.addLineSeries({ color: '#6c9be8', lineWidth: 2 });
     series.setData(data.map(d => ({ time: d[0], value: d[1] })));
   }
 
@@ -894,7 +895,7 @@ function renderIndexChart(name) {
     series.setData(ohlcData.map(d => ({ time: d[0], open: d[1], high: d[2], low: d[3], close: d[4] })));
   } else {
     const series = indexChart.addAreaSeries({
-      lineColor: '#60a5fa', topColor: 'rgba(96,165,250,0.3)', bottomColor: 'rgba(96,165,250,0.0)',
+      lineColor: '#6c9be8', topColor: 'rgba(96,165,250,0.3)', bottomColor: 'rgba(96,165,250,0.0)',
       lineWidth: 2, title: name,
     });
     series.setData(lineData.map(d => ({ time: d[0], value: d[1] })));
@@ -1018,7 +1019,7 @@ function renderMacroChart(key) {
     if (!values.length) return;
 
     const series = macroChart.addAreaSeries({
-      lineColor: '#60a5fa',
+      lineColor: '#6c9be8',
       topColor: 'rgba(96,165,250,0.25)',
       bottomColor: 'rgba(96,165,250,0.0)',
       lineWidth: 2,
@@ -1385,7 +1386,7 @@ renderVolume();
 """
 
 
-BOND_COLORS = ["#60a5fa", "#f87171", "#34d399", "#fbbf24", "#a78bfa", "#f472b6", "#22d3ee", "#fb923c", "#94a3b8"]
+BOND_COLORS = ["#6c9be8", "#f87171", "#34d399", "#fbbf24", "#a78bfa", "#f472b6", "#22d3ee", "#fb923c", "#94a3b8"]
 
 BOND_SCRIPT = """
 (function() {
@@ -1853,7 +1854,7 @@ def main():
 <div class="card" id="section-index">
   <div class="section-title">📊 Chỉ số dòng tiền (Money-flow Weighted Index)</div>
   <div class="hint">Mốc khởi điểm 1000 điểm tại phiên đầu tiên có dữ liệu. Trọng số mỗi mã = SMA({INDEX_SMOOTH_WINDOW} phiên) của giá trị giao dịch (giá × khối lượng) — đã làm mượt để giảm nhiễu.</div>
-  <div class="hint"><span style="color:#60a5fa">—</span> Chỉ số tự tính{vn_hint} · cột xám bên dưới = tổng giá trị giao dịch mỗi phiên</div>
+  <div class="hint"><span style="color:#6c9be8">—</span> Chỉ số tự tính{vn_hint} · cột xám bên dưới = tổng giá trị giao dịch mỗi phiên</div>
   <div class="hint" id="index-ohlc-hint" style="display:none">Chế độ nến: giá Mở(t) = Đóng(t-1); High/Low tổng hợp theo cùng trọng số dòng tiền với phần % thay đổi giá.</div>
   <div class="tf-toggle-row">
     <select id="index-select" class="index-select"></select>
@@ -1925,7 +1926,7 @@ def main():
 <div class="card" id="section-macro">
   <div class="section-title">🌐 Xem chi tiết 1 chỉ số</div>
   <div class="hint">Nguồn: FRED (Mỹ) · World Bank (VN) · yfinance (tỷ giá &amp; hàng hoá) · Cập nhật lần cuối: {updated}</div>
-  <div class="hint"><span style="color:#60a5fa">—</span> Chọn chỉ số từ dropdown để xem biểu đồ</div>
+  <div class="hint"><span style="color:#6c9be8">—</span> Chọn chỉ số từ dropdown để xem biểu đồ</div>
   <select id="macro-select" class="index-select">{opts_html}</select>
   <div id="macro-chart-container"></div>
   <div id="macro-description" class="hint" style="margin-top:8px;font-style:italic;"></div>

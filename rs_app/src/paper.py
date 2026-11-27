@@ -23,7 +23,7 @@ PT_CSS = """
 .pt-sub { opacity:.65; font-size:.85rem; }
 .pt-price { font-size:2.1rem; font-weight:900; line-height:1.1; }
 .pt-badge { display:inline-block; padding:.12rem .55rem; border-radius:999px; font-weight:800; font-size:.8rem;
-  background:rgba(123,97,255,.16); }
+  background:var(--fs-tint); }
 .pt-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.45rem; margin:.5rem 0 .2rem; }
 .pt-cell { border:1px solid color-mix(in srgb, currentColor 11%, transparent); border-radius:12px; padding:.4rem .6rem; }
 .pt-cell small { display:block; opacity:.6; font-size:.7rem; letter-spacing:.02em; }
@@ -34,9 +34,9 @@ PT_CSS = """
 .pt-row span:first-child { opacity:.68; }
 .pt-row.total { font-weight:800; font-size:1rem; border-bottom:none; padding-top:.45rem; }
 .pt-bar { height:.6rem; border-radius:999px; overflow:hidden; background:color-mix(in srgb, currentColor 10%, transparent); margin:.35rem 0 .15rem; }
-.pt-bar > i { display:block; height:100%; background:linear-gradient(90deg,#6A57F2,#2fa8ff); }
+.pt-bar > i { display:block; height:100%; background:linear-gradient(90deg, var(--fs-primary), var(--fs-accent)); }
 .pt-range { position:relative; height:.4rem; border-radius:999px; background:color-mix(in srgb, currentColor 12%, transparent); margin:.55rem 0 .25rem; }
-.pt-range > i { position:absolute; top:-.25rem; width:.9rem; height:.9rem; border-radius:50%; background:#6A57F2; transform:translateX(-50%); }
+.pt-range > i { position:absolute; top:-.25rem; width:.9rem; height:.9rem; border-radius:50%; background:var(--fs-primary); transform:translateX(-50%); }
 @media (max-width:640px) { .pt-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .pt-price { font-size:1.7rem; } }
 </style>
 """

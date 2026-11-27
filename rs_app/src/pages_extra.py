@@ -15,7 +15,7 @@ import streamlit as st
 from src import auth, engine, ui
 
 ROOT = Path(__file__).resolve().parent.parent  # thư mục rs_app/
-GREEN, RED, BLUE, AMBER = "#16a34a", "#dc2626", "#7B61FF", "#f59e0b"
+GREEN, RED, BLUE, AMBER = "#16a34a", "#dc2626", "#2F6FD0", "#f59e0b"
 GRID = "rgba(128,128,128,.18)"
 
 

@@ -69,8 +69,8 @@ CSS = """
 /* bottom: chừa chỗ cho nhãn "Manage app"/huy hiệu của Streamlit Cloud ở góc dưới phải */
 [class*="st-key-ai_fab"] { position: fixed; right: 20px; bottom: 84px; z-index: 1000; width: auto !important; }
 [class*="st-key-ai_fab"] button { border-radius: 999px !important; padding: .55rem 1.1rem; font-weight: 800;
-   background: linear-gradient(135deg,#6A57F2,#8b6cff) !important; color: #fff !important; border: 0 !important;
-   box-shadow: 0 14px 30px -10px rgba(106,87,242,.75); }
+   background: var(--fs-primary) !important; color: #fff !important; border: 0 !important;
+   box-shadow: 0 14px 30px -10px var(--fs-shadow); }
 [class*="st-key-ai_panel_"] { position: fixed; right: 20px; bottom: 84px; z-index: 1000; max-width: calc(100vw - 24px);
    border-radius: 22px; padding: .7rem .8rem .5rem; background: var(--ai-bg, #fff) !important;
    border: 1px solid color-mix(in srgb, currentColor 14%, transparent);

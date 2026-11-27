@@ -18,10 +18,10 @@ h1 { line-height: 1.15 !important; }
 
 /* Thẻ: st.container(border=True, key="card_...") */
 [class*="st-key-card"] {
-  border-radius: 24px;
+  border-radius: 14px;
   border: 1px solid color-mix(in srgb, currentColor 11%, transparent) !important;
   background: color-mix(in srgb, currentColor 3.5%, transparent);
-  box-shadow: 0 30px 60px -38px rgba(40,30,80,.38);
+  box-shadow: 0 30px 60px -38px rgba(16,34,63,.28);
 }
 [data-testid="stMetricValue"] { font-weight: 900; letter-spacing: -.03em; }
 [data-testid="stMetricLabel"] p { opacity: .7; font-size: .85rem; font-weight: 700; }
@@ -31,22 +31,22 @@ h1 { line-height: 1.15 !important; }
    phụ    = viền mảnh            (secondary)
    nhẹ    = không viền, hiện nền khi rê chuột (tertiary) */
 [data-testid^="stBaseButton-"] {
-  border-radius: 999px !important; font-weight: 700; letter-spacing: -.01em; min-height: 40px; padding: .25rem 1.1rem;
+  border-radius: 10px !important; font-weight: 700; letter-spacing: -.01em; min-height: 40px; padding: .25rem 1.1rem;
   transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 [data-testid^="stBaseButton-"]:active { transform: scale(.98); }
-[data-testid^="stBaseButton-"]:focus-visible { outline: 2px solid rgba(123,97,255,.9) !important; outline-offset: 2px; }
+[data-testid^="stBaseButton-"]:focus-visible { outline: 2px solid var(--fs-ring) !important; outline-offset: 2px; }
 [data-testid^="stBaseButton-"]:disabled { opacity: .45; cursor: not-allowed; box-shadow: none !important; }
 
 [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"] {
   background: transparent; border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
 }
 [data-testid="stBaseButton-secondary"]:hover:not(:disabled), [data-testid="stBaseButton-secondaryFormSubmit"]:hover:not(:disabled) {
-  background: rgba(123,97,255,.10); border-color: rgba(123,97,255,.55); color: inherit;
+  background: var(--fs-tint); border-color: var(--fs-ring); color: inherit;
 }
 [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {
-  background: linear-gradient(135deg, #6A57F2, #8b6cff) !important; color: #fff !important; border: 0 !important;
-  box-shadow: 0 10px 22px -10px rgba(106,87,242,.85);
+  background: var(--fs-primary) !important; color: #fff !important; border: 0 !important;
+  box-shadow: 0 10px 22px -10px var(--fs-shadow);
 }
 [data-testid="stBaseButton-primary"]:hover:not(:disabled), [data-testid="stBaseButton-primaryFormSubmit"]:hover:not(:disabled) {
   filter: brightness(1.08); transform: translateY(-1px);
@@ -56,11 +56,11 @@ h1 { line-height: 1.15 !important; }
 
 /* Nút chọn (st.segmented_control: Ngày|Tuần, Gọn|Vừa|Lớn...): một thanh liền, ô đang chọn tô tím đặc */
 [data-testid="stButtonGroup"] [role="radiogroup"], [data-testid="stButtonGroup"] [role="group"] {
-  display: inline-flex; flex-wrap: nowrap; gap: 2px !important; padding: 3px; border-radius: 999px;
+  display: inline-flex; flex-wrap: nowrap; gap: 2px !important; padding: 3px; border-radius: 12px;
   background: color-mix(in srgb, currentColor 7%, transparent); border: 1px solid color-mix(in srgb, currentColor 8%, transparent);
 }
 [data-testid="stButtonGroup"] button[data-variant="segmented_control"] {
-  border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 999px !important;
+  border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 9px !important;
   min-height: 32px !important; padding: 0 .95rem !important; font-weight: 700; color: inherit !important;
 }
 [data-testid="stButtonGroup"] button[data-variant="segmented_control"]:hover:not([data-selected="true"]) {
@@ -68,69 +68,69 @@ h1 { line-height: 1.15 !important; }
 }
 [data-testid="stButtonGroup"] button[data-variant="segmented_control"][data-selected="true"],
 [data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] {
-  background: linear-gradient(135deg, #6A57F2, #8b6cff) !important; color: #fff !important;
-  box-shadow: 0 6px 14px -6px rgba(106,87,242,.9) !important;
+  background: var(--fs-primary) !important; color: #fff !important;
+  box-shadow: 0 6px 14px -6px var(--fs-shadow) !important;
 }
 [data-testid="stButtonGroup"] button[data-variant="segmented_control"] p { color: inherit !important; }
-[data-testid="stTextInput"] [data-baseweb="input"] { border-radius: 999px; }
+[data-testid="stTextInput"] [data-baseweb="input"] { border-radius: 10px; }
 [data-testid="stSelectbox"] [data-baseweb="select"] > div,
-[data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-radius: 16px; }
-[data-testid="stDataFrame"] { border-radius: 16px; overflow: hidden; }
-[data-testid="stExpander"] details { border-radius: 18px; }
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div { border-radius: 10px; }
+[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
+[data-testid="stExpander"] details { border-radius: 12px; }
 
 /* ===== Thanh bên =====
    mục danh sách giữ nguyên; thêm: khoảng thoáng, rê chuột, thanh nhấn tím cho trang đang mở */
 [data-testid="stSidebar"] { border-right: 1px solid color-mix(in srgb, currentColor 9%, transparent); }
 [data-testid="stSidebarNavItems"] { gap: 2px; }
 [data-testid="stSidebarNavLink"] {
-  position: relative; border-radius: 14px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
+  position: relative; border-radius: 10px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
   transition: background-color .15s ease, transform .15s ease;
 }
 [data-testid="stSidebarNavLink"]:hover:not([aria-current="page"]) { background: color-mix(in srgb, currentColor 7%, transparent); transform: translateX(2px); }
-[data-testid="stSidebarNavLink"][aria-current="page"] { background: rgba(123,97,255,.16); font-weight: 800; }
+[data-testid="stSidebarNavLink"][aria-current="page"] { background: var(--fs-tint); font-weight: 800; }
 [data-testid="stSidebarNavLink"][aria-current="page"]::before {
   content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
-  background: linear-gradient(180deg, #6A57F2, #2fa8ff);
+  background: var(--fs-accent);
 }
 /* Menu mục lục tự vẽ (key="side_nav" ở app.py): mục lớn thu gọn được, trang con thụt vào có đường kẻ dọc */
 .st-key-side_nav { gap: 4px !important; margin: .5rem 0 .4rem; }
 .st-key-side_nav [data-testid="stElementContainer"] { margin: 0; }
 .st-key-side_nav [data-testid="stPageLink-NavLink"] {
-  position: relative; border-radius: 14px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
+  position: relative; border-radius: 10px; font-weight: 600; padding: .38rem .8rem; min-height: 40px;
   transition: background-color .15s ease, transform .15s ease;
 }
 .st-key-side_nav [data-testid="stPageLink-NavLink"]:hover:not([aria-current="page"]) { background: color-mix(in srgb, currentColor 7%, transparent); transform: translateX(2px); }
-.st-key-side_nav [data-testid="stPageLink-NavLink"][aria-current="page"] { background: rgba(123,97,255,.16); font-weight: 800; }
+.st-key-side_nav [data-testid="stPageLink-NavLink"][aria-current="page"] { background: var(--fs-tint); font-weight: 800; }
 .st-key-side_nav [data-testid="stPageLink-NavLink"][aria-current="page"]::before {
   content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 4px; border-radius: 0 4px 4px 0;
-  background: linear-gradient(180deg, #6A57F2, #2fa8ff);
+  background: var(--fs-primary);
 }
 /* mục lớn: trang đứng riêng + tiêu đề khối thu gọn cùng kiểu chữ đậm */
 .st-key-side_nav [class*="st-key-nav_top_"] [data-testid="stPageLink-NavLink"] { font-weight: 800; }
 .st-key-side_nav [data-testid="stExpander"] details { border: 0 !important; background: transparent !important; }
-.st-key-side_nav [data-testid="stExpander"] summary { padding: .45rem .8rem; min-height: 40px; border-radius: 14px; font-weight: 800; }
+.st-key-side_nav [data-testid="stExpander"] summary { padding: .45rem .8rem; min-height: 40px; border-radius: 10px; font-weight: 800; }
 .st-key-side_nav [data-testid="stExpander"] summary:hover { background: color-mix(in srgb, currentColor 7%, transparent); }
 .st-key-side_nav [data-testid="stExpanderDetails"] { gap: 2px; padding: 0 0 .25rem .35rem; margin-left: 1.2rem;
   border-left: 2px solid color-mix(in srgb, currentColor 13%, transparent); }
 .st-key-side_nav [data-testid="stExpanderDetails"] [data-testid="stPageLink-NavLink"] { font-weight: 600; font-size: .93rem; min-height: 36px; }
 /* Thẻ người dùng + chân thanh bên (key="side_user", "side_foot" ở app.py) */
-.st-key-side_user { border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 18px; padding: .7rem .75rem .6rem;
+.st-key-side_user { border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 12px; padding: .7rem .75rem .6rem;
   background: color-mix(in srgb, currentColor 4%, transparent); }
 .side-id { display: flex; align-items: center; gap: .65rem; margin-bottom: .55rem; }
 .side-av { flex: 0 0 auto; width: 2.35rem; height: 2.35rem; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 900;
-  background: linear-gradient(135deg, #6A57F2, #2fa8ff); }
+  background: var(--fs-primary); }
 .side-name { font-weight: 800; letter-spacing: -.02em; line-height: 1.2; overflow-wrap: anywhere; }
 .side-role { display: inline-block; margin-top: .15rem; padding: .05rem .5rem; border-radius: 999px; font-size: .72rem; font-weight: 800;
-  background: rgba(123,97,255,.15); }
+  background: var(--fs-tint); }
 .st-key-side_foot { margin-top: .4rem; }
 .st-key-side_foot [data-testid="stCaptionContainer"] { opacity: .6; font-size: .78rem; }
 
 .auth-card { background: color-mix(in srgb, currentColor 4%, transparent); border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
-             border-radius: 24px; padding: 1.4rem 1.2rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 30px 60px -38px rgba(40,30,80,.38); }
+             border-radius: 14px; padding: 1.4rem 1.2rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 30px 60px -38px rgba(16,34,63,.28); }
 .auth-title { font-weight: 900; font-size: 1.3rem; letter-spacing: -.02em; }
 .auth-sub { opacity: .7; font-size: .88rem; margin-top: .2rem; }
 .hint-box { background: color-mix(in srgb, currentColor 4%, transparent); border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
-            border-radius: 14px; padding: .7rem .9rem; font-size: .85rem; opacity: .9; }
+            border-radius: 10px; padding: .7rem .9rem; font-size: .85rem; opacity: .9; }
 .asof { opacity: .7; font-size: .85rem; margin-bottom: .4rem; }
 
 .auth-logo { width: 76px; height: 76px; margin: 0 auto .7rem; border-radius: 22px; overflow: hidden;
@@ -159,14 +159,29 @@ h1 { line-height: 1.15 !important; }
   [data-testid="stSidebarNavLink"], .st-key-side_nav [data-testid="stPageLink-NavLink"] { padding: .5rem .8rem; min-height: 44px; }
   [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
   [data-testid="stMetricLabel"] p { font-size: .78rem; }
-  [class*="st-key-card"] { border-radius: 18px; }
+  [class*="st-key-card"] { border-radius: 12px; }
 }
 </style>
 """
 
 
+# Bảng màu FinSight (lấy từ logo): navy = màu chính, xanh lục = điểm nhấn nhỏ; xanh lục/đỏ của giá tăng/giảm giữ riêng.
+# Sáng/tối khác nhau nên chèn theo theme hiện tại mỗi lần chạy (không đặt cứng trong CSS).
+_TOKENS = {
+    "light": dict(primary="#14305A", accent="#1FA97A", tint="rgba(20,48,90,.10)", ring="rgba(20,48,90,.55)", shadow="rgba(20,48,90,.45)"),
+    "dark":  dict(primary="#3D74D1", accent="#2CC593", tint="rgba(108,155,232,.16)", ring="rgba(108,155,232,.75)", shadow="rgba(61,116,209,.55)"),
+}
+
+
+def _tokens_css() -> str:
+    mode = "dark" if getattr(st.context.theme, "type", None) == "dark" else "light"
+    t = _TOKENS[mode]
+    return (f"<style>:root{{--fs-primary:{t['primary']};--fs-accent:{t['accent']};--fs-tint:{t['tint']};"
+            f"--fs-ring:{t['ring']};--fs-shadow:{t['shadow']};}}</style>")
+
+
 def apply_css():
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(_tokens_css() + CSS, unsafe_allow_html=True)
 
 
 # ----------------------------------------------------------------------------
@@ -389,7 +404,7 @@ def candle_chart(ohlcv: pd.DataFrame, title: str, tail: int | None = None) -> go
         fig.add_trace(go.Scatter(x=xs, y=ohlcv["ma5"], mode="lines", name="TB5",
                                  line=dict(color="#f59e0b", width=1.4)), row=2, col=1)
         fig.add_trace(go.Scatter(x=xs, y=ohlcv["ma20"], mode="lines", name="TB20",
-                                 line=dict(color="#7B61FF", width=1.4)), row=2, col=1)
+                                 line=dict(color="#2F6FD0", width=1.4)), row=2, col=1)
     fig.update_layout(title=title, height=460, showlegend=has_vol, margin=dict(l=10, r=10, t=40, b=10),
                       legend=dict(orientation="h", y=1.04, x=1, xanchor="right"),
                       xaxis_rangeslider_visible=False)
@@ -424,7 +439,7 @@ border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer}
 border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 #tb button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
 #tb button:hover{background:rgba(128,128,128,.32)}
-#tb button.on{background:rgba(41,98,255,.42);border-color:#2962ff;color:#fff}
+#tb button.on{background:rgba(47,111,208,.42);border-color:#2f6fd0;color:#fff}
 #tb .sep{height:1px;background:__GRID__;margin:3px 5px}
 #tb button::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);white-space:nowrap;
 background:#111827;color:#fff;font-size:12px;padding:4px 9px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .12s;z-index:9}
@@ -589,7 +604,7 @@ window.addEventListener("pagehide", closeOv);
   try {
     const main = H[0][1], wrap = document.getElementById("c"), ts = chart.timeScale();
     const cv = document.getElementById("dv"), g = cv.getContext("2d");
-    const BLUE = "#2962ff", UPA = "rgba(22,163,74,.16)", DNA = "rgba(220,38,38,.16)", BLA = "rgba(41,98,255,.12)";
+    const BLUE = "#2f6fd0", UPA = "rgba(22,163,74,.16)", DNA = "rgba(220,38,38,.16)", BLA = "rgba(47,111,208,.12)";
     const times = first.map(x => x.time), key = "rsdraw:" + D.title;
     let shapes = [], ruler = null, pend = null, hover = null, tool = "";
     const load = () => { try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { return []; } };
@@ -801,5 +816,5 @@ def price_chart(ohlcv: pd.DataFrame, title: str, height: int = 560) -> None:
         {"weight": 3, "series": [tv_candles(d)]},
         {"weight": 1, "series": [tv_hist(vol, "KL", up=d["close"] >= d["open"]),
                                  tv_line(vol.rolling(5).mean(), "#f59e0b", "TB5", 1, dec=0),
-                                 tv_line(vol.rolling(20).mean(), "#7B61FF", "TB20", 1, dec=0)]},
+                                 tv_line(vol.rolling(20).mean(), "#2F6FD0", "TB20", 1, dec=0)]},
     ], height)

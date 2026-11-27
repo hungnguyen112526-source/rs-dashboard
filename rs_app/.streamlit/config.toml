@@ -1,22 +1,22 @@
-# Giao diện theo mẫu "lucianLabs UI": nền kem + thẻ bo tròn + điểm nhấn tím/xanh, font Pretendard.
+# Giao diện FinSight: bảng màu lấy từ logo (navy + xanh lục), thẻ bo 12-14px, nút bo 10px, font Pretendard.
 # Người dùng đổi sáng/tối bằng menu ⋮ (góc trên phải) → Settings → Theme.
 [theme]
-primaryColor = "#6A57F2"
+primaryColor = "#14305A"
 # Pretendard (hỗ trợ đủ dấu tiếng Việt); tải theo từng phần nhỏ nên nhẹ. Thiếu mạng thì dùng font hệ thống.
 font = "Pretendard Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css, sans-serif"
-baseRadius = "large"
+baseRadius = "medium"
 
 [theme.light]
-primaryColor = "#6A57F2"
-backgroundColor = "#F4F2EE"
+primaryColor = "#14305A"
+backgroundColor = "#F5F7FA"
 secondaryBackgroundColor = "#FFFFFF"
-textColor = "#16151B"
+textColor = "#10223F"
 
 [theme.dark]
-primaryColor = "#B7A4FF"
-backgroundColor = "#07080D"
-secondaryBackgroundColor = "#13141C"
-textColor = "#F4F0E8"
+primaryColor = "#6C9BE8"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#111A2C"
+textColor = "#E8EDF5"
 
 [client]
 toolbarMode = "auto"

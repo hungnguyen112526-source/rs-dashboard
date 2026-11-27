@@ -12,12 +12,12 @@ HERO_CSS = """
 .home-title span { background: linear-gradient(90deg,#1fa97a,#2cc79a); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .home-lead { font-size: 1.08rem; line-height: 1.6; max-width: 46rem; opacity: .88; }
 .home-pill { display: inline-block; margin-top: .8rem; padding: .25rem .8rem; border-radius: 999px; font-size: .82rem; font-weight: 700;
-             background: rgba(123,97,255,.14); }
+             background: var(--fs-tint); }
 .home-card-title { font-weight: 800; font-size: 1.02rem; letter-spacing: -.02em; }
 .home-card-text { font-size: .88rem; opacity: .78; line-height: 1.5; min-height: 6.2em; }
 .home-step { display: flex; gap: .8rem; align-items: flex-start; margin: .5rem 0; }
 .home-step b.n { flex: 0 0 auto; width: 1.9rem; height: 1.9rem; border-radius: 50%; display: grid; place-items: center;
-                 background: linear-gradient(135deg,#6A57F2,#8b6cff); color: #fff; font-size: .9rem; }
+                 background: var(--fs-primary); color: #fff; font-size: .9rem; }
 .home-kpi-label { font-size: .85rem; font-weight: 700; opacity: .7; }
 .home-kpi-value { font-size: 1.35rem; font-weight: 900; letter-spacing: -.03em; line-height: 1.2; margin: .15rem 0 .3rem; }
 .home-kpi-note { font-size: .8rem; font-weight: 700; color: #16a34a; }
