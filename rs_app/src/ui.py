@@ -123,6 +123,7 @@ h1 { line-height: 1.15 !important; }
 .side-role { display: inline-block; margin-top: .15rem; padding: .05rem .5rem; border-radius: 999px; font-size: .72rem; font-weight: 800;
   background: var(--fs-tint); }
 .st-key-side_foot { margin-top: .4rem; }
+.st-key-side_logout { margin-top: 1rem; padding-bottom: .5rem; }
 .st-key-side_foot [data-testid="stCaptionContainer"] { opacity: .6; font-size: .78rem; }
 
 .auth-card { background: color-mix(in srgb, currentColor 4%, transparent); border: 1px solid color-mix(in srgb, currentColor 11%, transparent);

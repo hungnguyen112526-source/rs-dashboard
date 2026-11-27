@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import auth, engine, home, night, pages_extra, ui  # noqa: E402
+from src import auth, engine, home, pages_extra, ui  # noqa: E402
 try:
     from src import ai_chat, ai_tools  # noqa: E402
 except ImportError:      # thiếu file AI thì app vẫn chạy bình thường, chỉ không có khung chat
@@ -67,18 +67,15 @@ MTIME = data_path.stat().st_mtime
 stocks, vnindex = load_all(str(data_path), MTIME)
 as_of = f"{stocks['date'].max():%d/%m/%Y}"
 
-# ---- Sidebar: chỉ còn người dùng + Thoát + mốc dữ liệu ----
+# ---- Sidebar: người dùng (trên cùng), menu, mốc dữ liệu, nút Thoát (dưới cùng) ----
 with st.sidebar:
     _disp = str(user.get("fullname") or user["username"])
     with st.container(key="side_user"):
         st.html(f'<div class="side-id"><div class="side-av">{html.escape(_disp[:1].upper())}</div>'
                 f'<div><div class="side-name">{html.escape(_disp)}</div>'
                 f'<span class="side-role">{"Quản trị" if is_admin else "Thành viên"}</span></div></div>')
-        if st.button("Thoát", icon=":material/logout:", width="stretch", key="logout_btn"):
-            auth.logout()
     nav_slot = st.container(key="side_nav")     # menu mục lục: được vẽ ở cuối file (cần có `sections` trước)
     with st.container(key="side_foot"):
-        night.render(night.toggle())
         st.caption(f"Dữ liệu đến {as_of} · {stocks['ticker'].nunique()} mã")
         _src = pages_extra.load_json("price_source_log.json")     # do fetch_data.py ghi (nguồn giá của từng mã)
         if isinstance(_src, dict) and _src.get("counts"):
@@ -94,6 +91,10 @@ with st.sidebar:
                             st.caption(f"Lý do TradingView tắt: {_src['tv_disabled_reason']}")
                         for t, v in list(_fb.items())[:60]:
                             st.caption(f"**{t}** · {v.get('source')} · {v.get('note', '')}")
+
+    with st.container(key="side_logout"):
+        if st.button("Thoát", icon=":material/logout:", width="stretch", key="logout_btn"):
+            auth.logout()
 
 
 @st.cache_data(ttl=600)

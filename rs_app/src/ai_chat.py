@@ -65,7 +65,7 @@ SUGGESTIONS = ["Tóm tắt thị trường phiên gần nhất", "Ngành nào đ
 
 CSS = """
 <style>
-/* Khung chat AI nổi. Màu nền đặt đục (không trong suốt) để đọc rõ trên mọi trang và cả nền Temple Night. */
+/* Khung chat AI nổi. Màu nền đặt đục (không trong suốt) để đọc rõ trên mọi trang. */
 /* bottom: chừa chỗ cho nhãn "Manage app"/huy hiệu của Streamlit Cloud ở góc dưới phải */
 [class*="st-key-ai_fab"] { position: fixed; right: 20px; bottom: 84px; z-index: 1000; width: auto !important; }
 [class*="st-key-ai_fab"] button { border-radius: 999px !important; padding: .55rem 1.1rem; font-weight: 800;
